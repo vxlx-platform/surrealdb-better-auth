@@ -1,0 +1,34 @@
+{
+  "name": "@vxlx/surrealdb-better-auth",
+  "version": "0.1.0",
+  "description": "SurrealDB adapter for Better Auth",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "better-auth": "catalog:",
+    "surrealdb": "catalog:"
+  },
+  "devDependencies": {
+    "@vxlx/config": "workspace:*",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
