@@ -312,8 +312,13 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           }
 
           if (w.field === "id" && operator === "in") {
-            const values = Array.isArray(w.value) ? w.value : [];
-            ids.push(...values.map((value) => toRecordId(model, value)));
+            if (Array.isArray(w.value) && w.value.length > 0) {
+              ids.push(...w.value.map((value) => toRecordId(model, value)));
+              continue;
+            }
+
+            // Keep invalid/empty IN conditions in WHERE so they don't broaden scope.
+            rest.push(w);
             continue;
           }
 
@@ -348,15 +353,23 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         const fieldName = getFieldName({ field: where.field, model });
         const fieldAttributes = getFieldAttributes({ field: where.field, model });
 
+        const operator = where.operator ?? "eq";
         let value: unknown = where.value;
 
         if (fieldAttributes?.references && typeof value === "string") {
           const refTable = fieldAttributes.references.model;
           value = new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(value)));
+        } else if (fieldAttributes?.references && operator === "in" && Array.isArray(value)) {
+          const refTable = fieldAttributes.references.model;
+          value = value.map((entry) => {
+            if (typeof entry === "string" || typeof entry === "number" || typeof entry === "bigint") {
+              return new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(entry)));
+            }
+            return entry;
+          });
         }
 
         const ident = escapeIdent(fieldName);
-        const operator = where.operator ?? "eq";
 
         switch (operator) {
           case "eq":
@@ -722,7 +735,7 @@ export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) =
         throw new Error(`Array type not supported: ${JSON.stringify(field.type)}`);
       }
 
-      let type = (
+      const primitiveType = (
         {
           string: "string",
           number: "number",
@@ -733,8 +746,12 @@ export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) =
         } as Record<string, string>
       )[field.type as string];
 
+      let type = primitiveType;
+
       if (field.references) {
         type = `record<${escapeIdent(getModelName(field.references.model))}>`;
+      } else if (!type) {
+        throw new Error(`Unsupported field type "${String(field.type)}" for ${table.modelName}.${dbFieldName}`);
       }
 
       if (!field.required) {

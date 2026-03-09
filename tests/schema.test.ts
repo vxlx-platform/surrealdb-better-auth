@@ -112,4 +112,24 @@ describe("Adapter Schema Generation (createSchema)", () => {
       }),
     ).rejects.toThrow(/Array type not supported/);
   });
+
+  it("throws an error if an unsupported primitive field type is passed", async () => {
+    const invalidSchema: BetterAuthDBSchema = {
+      test: {
+        modelName: "test",
+        fields: {
+          rating: { type: "float" as any, required: true },
+        },
+      },
+    };
+
+    await expect(
+      generateSurqlSchema({
+        file: "",
+        tables: invalidSchema,
+        getModelName,
+        getFieldName,
+      }),
+    ).rejects.toThrow(/Unsupported field type/);
+  });
 });
