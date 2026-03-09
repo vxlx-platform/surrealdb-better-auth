@@ -247,3 +247,87 @@ describe("E2E Authentication Flow & CRUD Validation", () => {
     expect(nextSignIn.token).toBeDefined();
   });
 });
+
+describe("Email Verification Flow", () => {
+  let db: Surreal;
+  let auth: Awaited<ReturnType<typeof buildAdapter>>["auth"];
+  let adapter: DBAdapter;
+  const verificationTokens = new Map<string, string>();
+
+  beforeAll(async () => {
+    const built = await buildAdapter(
+      { debugLogs: false },
+      {
+        baseURL: "http://localhost",
+        emailAndPassword: {
+          enabled: true,
+          requireEmailVerification: true,
+        },
+        emailVerification: {
+          sendOnSignIn: false,
+          sendVerificationEmail: async ({ user, token }: { user: { email: string }; token: string }) => {
+            verificationTokens.set(user.email, token);
+          },
+        },
+      },
+    );
+    db = built.db;
+    auth = built.auth;
+    adapter = built.adapter;
+
+    await ensureSchema(db, adapter, built.builtConfig);
+  }, 60_000);
+
+  beforeEach(async () => {
+    verificationTokens.clear();
+    await truncateAuthTables(db);
+  });
+
+  afterAll(async () => {
+    if (db) await db.close();
+  });
+
+  it("blocks sign-in before verification, then allows it after verifyEmail", async () => {
+    const email = "verify-me@example.com";
+    const password = "VerifyPassword123!";
+
+    const signedUp = await auth.api.signUpEmail({
+      body: {
+        name: "Verify Me",
+        email,
+        password,
+      },
+    });
+    expect(signedUp.user.emailVerified).toBe(false);
+
+    await expect(
+      auth.api.signInEmail({
+        body: { email, password },
+      }),
+    ).rejects.toThrow();
+
+    await auth.api.sendVerificationEmail({
+      body: { email },
+    });
+
+    const token = verificationTokens.get(email);
+    expect(token).toBeDefined();
+
+    const verified = await auth.api.verifyEmail({
+      query: { token: token! },
+    });
+    expect((verified as { status?: boolean })?.status).toBe(true);
+
+    const dbUser = await adapter.findOne<Record<string, unknown>>({
+      model: "user",
+      where: [{ field: "id", operator: "eq", value: signedUp.user.id }],
+    });
+    expect(dbUser?.emailVerified).toBe(true);
+
+    const signIn = await auth.api.signInEmail({
+      body: { email, password },
+    });
+    expect(signIn.user.id).toBe(signedUp.user.id);
+    expect(signIn.token).toBeDefined();
+  });
+});

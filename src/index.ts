@@ -631,8 +631,9 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
             target,
           );
 
-          query.append(surql` MERGE ${patch} RETURN AFTER`);
+          query.append(surql` MERGE ${patch}`);
           appendWhere(query, tableName, rest);
+          query.append(" RETURN AFTER");
 
           return queryOne<T>(query);
         },
