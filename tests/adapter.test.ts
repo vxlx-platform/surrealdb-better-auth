@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Surreal } from "surrealdb";
 
 import { buildAdapter, ensureSchema, truncateAuthTables } from "./test-utils";
+import type { UserRow } from "../src/types";
 
 describe("surrealdb-adapter CRUD", () => {
   let db: Surreal;
@@ -26,7 +27,7 @@ describe("surrealdb-adapter CRUD", () => {
   it("creates a user record and returns a normalized id", async () => {
     const now = new Date();
 
-    const result = await adapter.create<Record<string, unknown>>({
+    const result = await adapter.create<UserRow>({
       model: "user",
       data: {
         name: "Test User",
@@ -60,7 +61,7 @@ describe("surrealdb-adapter CRUD", () => {
   });
 
   it("finds a record by logical id", async () => {
-    const user = await adapter.create<Record<string, unknown>>({
+    const user = await adapter.create<UserRow>({
       model: "user",
       data: {
         name: "Find One User",
@@ -71,9 +72,9 @@ describe("surrealdb-adapter CRUD", () => {
       },
     });
 
-    const found = await adapter.findOne<Record<string, unknown>>({
+    const found = await adapter.findOne<UserRow>({
       model: "user",
-      where: [{ field: "id", operator: "eq", value: user.id as string }],
+      where: [{ field: "id", operator: "eq", value: user.id }],
     });
 
     expect(found).not.toBeNull();
@@ -97,7 +98,7 @@ describe("surrealdb-adapter CRUD", () => {
       },
     });
 
-    await adapter.create({
+    await adapter.create<UserRow>({
       model: "user",
       data: {
         name: "Alpha",
@@ -108,17 +109,17 @@ describe("surrealdb-adapter CRUD", () => {
       },
     });
 
-    const users = await adapter.findMany<Record<string, unknown>>({
+    const users = (await adapter.findMany({
       model: "user",
       sortBy: { field: "email", direction: "asc" },
-    });
+    })) as UserRow[];
 
     expect(users).toHaveLength(2);
     expect(users.map((user) => user.email)).toEqual(["alpha@example.com", "beta@example.com"]);
   });
 
   it("updates a record by logical id", async () => {
-    const user = await adapter.create<Record<string, unknown>>({
+    const user = await adapter.create<UserRow>({
       model: "user",
       data: {
         name: "Original Name",
@@ -129,9 +130,9 @@ describe("surrealdb-adapter CRUD", () => {
       },
     });
 
-    const updated = await adapter.update<Record<string, unknown>>({
+    const updated = await adapter.update<UserRow>({
       model: "user",
-      where: [{ field: "id", operator: "eq", value: user.id as string }],
+      where: [{ field: "id", operator: "eq", value: user.id }],
       update: {
         name: "Updated Name",
         updatedAt: new Date(),
@@ -147,7 +148,7 @@ describe("surrealdb-adapter CRUD", () => {
   });
 
   it("deletes a record by logical id", async () => {
-    const user = await adapter.create<Record<string, unknown>>({
+    const user = await adapter.create<UserRow>({
       model: "user",
       data: {
         name: "Delete Me",
@@ -160,12 +161,12 @@ describe("surrealdb-adapter CRUD", () => {
 
     await adapter.delete({
       model: "user",
-      where: [{ field: "id", operator: "eq", value: user.id as string }],
+      where: [{ field: "id", operator: "eq", value: user.id }],
     });
 
     const found = await adapter.findOne({
       model: "user",
-      where: [{ field: "id", operator: "eq", value: user.id as string }],
+      where: [{ field: "id", operator: "eq", value: user.id }],
     });
 
     expect(found).toBeNull();

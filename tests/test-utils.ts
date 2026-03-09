@@ -1,5 +1,5 @@
 import type { DBAdapter, DBAdapterInstance } from "@better-auth/core/db/adapter";
-import { betterAuth, type BetterAuthDBSchema, type BetterAuthOptions } from "better-auth";
+import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { Surreal } from "surrealdb";
 
 import { surrealAdapter, type SurrealAdapterConfig } from "../src";
@@ -11,11 +11,6 @@ export async function createTestDb() {
   await db.use({ namespace: "main", database: "main" });
   return { db };
 }
-
-type BetterAuthOptionsWithSchema = BetterAuthOptions & {
-  databaseHooks?: { getSchema?: () => BetterAuthDBSchema };
-  schema?: BetterAuthDBSchema;
-};
 
 export async function buildAdapter(
   options?: SurrealAdapterConfig,
@@ -41,18 +36,7 @@ export async function ensureSchema(
   adapter: DBAdapter,
   builtConfig: BetterAuthOptions,
 ) {
-  const createSchemaFn = adapter.createSchema as (config: {
-    file: string;
-    tables: BetterAuthDBSchema;
-  }) => Promise<{ code: string }>;
-
-  const schemaConfig = builtConfig as BetterAuthOptionsWithSchema;
-  const schema = schemaConfig.databaseHooks?.getSchema?.() ?? schemaConfig.schema ?? {};
-
-  const result = await createSchemaFn({
-    file: "",
-    tables: schema,
-  });
+  const result = await adapter.createSchema!(builtConfig, "");
 
   if (!result?.code) return;
 

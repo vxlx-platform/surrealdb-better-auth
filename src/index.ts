@@ -3,6 +3,7 @@ import {
   type DBAdapterDebugLogOption,
   type Where,
 } from "better-auth/adapters";
+import { type BetterAuthDBSchema } from "better-auth";
 import {
   BoundQuery,
   RecordId,
@@ -220,7 +221,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
 
       /**
        * Better Auth should not generate ids itself.
-       * SurrealDB record ids act as the true record address.
+       * SurrealDB record ids act as the record-address.
        *
        * NOTE: If Better Auth provides an `id`, we still honor it as the record key component.
        */
@@ -589,7 +590,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           update: T;
         }): Promise<T | null> => {
           const tableName = getModelName(model);
-          const { target, rest } = splitIdWhere(tableName, where);
+          const { target, rest = [] } = splitIdWhere(tableName, where);
           const patch = stripIdFromPayload(update as Record<string, unknown>);
 
           const query = makeTargetQuery(
@@ -671,76 +672,95 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         },
 
         createSchema: async (options) => {
-          const { file, tables } = options || {};
-          const code: string[] = [];
-
-          for (const tableKey in tables) {
-            const table = tables[tableKey];
-            if (!table) continue;
-
-            const tableName = escapeIdent(getModelName(table.modelName));
-            code.push(`DEFINE TABLE ${tableName} SCHEMAFULL;`);
-
-            for (const fieldKey in table.fields) {
-              const field = table.fields[fieldKey];
-              if (!field) continue;
-
-              const dbFieldName = field.fieldName || fieldKey;
-              if (dbFieldName === "id") continue;
-
-              const fieldName = escapeIdent(
-                getFieldName({ field: dbFieldName, model: table.modelName }),
-              );
-
-              if (Array.isArray(field.type)) {
-                throw new Error(`Array type not supported: ${JSON.stringify(field.type)}`);
-              }
-
-              let type = (
-                {
-                  string: "string",
-                  number: "number",
-                  boolean: "bool",
-                  date: "datetime",
-                  "number[]": "array<number>",
-                  "string[]": "array<string>",
-                } as Record<string, string>
-              )[field.type as string];
-
-              if (field.references) {
-                type = `record<${escapeIdent(getModelName(field.references.model))}>`;
-              }
-
-              if (!field.required) {
-                type = `option<${type}>`;
-              }
-
-              code.push(`DEFINE FIELD ${fieldName} ON ${tableName} TYPE ${type};`);
-
-              if (field.unique) {
-                const base = tableName.replace(/`/g, "");
-                const col = fieldName.replace(/`/g, "");
-                const idxName = `${base}${col.charAt(0).toUpperCase()}${col.slice(1)}_idx`;
-                code.push(
-                  `DEFINE INDEX ${escapeIdent(idxName)} ON ${tableName} COLUMNS ${fieldName} UNIQUE;`,
-                );
-              } else if (field.references || fieldKey.toLowerCase().includes("id")) {
-                code.push(
-                  `DEFINE INDEX ${escapeIdent(`${fieldName.replace(/`/g, "")}_idx`)} ON ${tableName} COLUMNS ${fieldName};`,
-                );
-              }
-            }
-
-            code.push("");
-          }
-
-          const suggested = file
-            ? file.replace(/\.[^/.]+$/, ".surql")
-            : ".better-auth/schema.surql";
-
-          return { code: code.join("\n"), path: suggested };
+          return generateSurqlSchema({
+            ...options,
+            getModelName,
+            getFieldName,
+          });
         },
       };
     },
   });
+};
+
+/**
+ * Arguments for the SurQL schema generator.
+ */
+export interface GenerateSurqlSchemaOptions {
+  file?: string;
+  tables?: BetterAuthDBSchema;
+  getModelName: (modelName: string) => string;
+  getFieldName: (options: { field: string; model: string }) => string;
+}
+
+/**
+ * Returns a SurQL schema string based on the provided Better Auth schema.
+ *
+ * This function is decoupled from the adapter factory to allow direct testing.
+ */
+export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) => {
+  const { file, tables, getModelName, getFieldName } = options;
+  const code: string[] = [];
+
+  for (const tableKey in tables) {
+    const table = tables[tableKey];
+    if (!table) continue;
+
+    const tableName = escapeIdent(getModelName(table.modelName));
+    code.push(`DEFINE TABLE ${tableName} SCHEMAFULL;`);
+
+    for (const fieldKey in table.fields) {
+      const field = table.fields[fieldKey];
+      if (!field) continue;
+
+      const dbFieldName = field.fieldName || fieldKey;
+      if (dbFieldName === "id") continue;
+
+      const fieldName = escapeIdent(getFieldName({ field: dbFieldName, model: table.modelName }));
+
+      if (Array.isArray(field.type)) {
+        throw new Error(`Array type not supported: ${JSON.stringify(field.type)}`);
+      }
+
+      let type = (
+        {
+          string: "string",
+          number: "number",
+          boolean: "bool",
+          date: "datetime",
+          "number[]": "array<number>",
+          "string[]": "array<string>",
+        } as Record<string, string>
+      )[field.type as string];
+
+      if (field.references) {
+        type = `record<${escapeIdent(getModelName(field.references.model))}>`;
+      }
+
+      if (!field.required) {
+        type = `option<${type}>`;
+      }
+
+      code.push(`DEFINE FIELD ${fieldName} ON ${tableName} TYPE ${type};`);
+
+      if (field.unique) {
+        const base = tableName.replace(/`/g, "");
+        const col = fieldName.replace(/`/g, "");
+        const idxName = `${base}${col.charAt(0).toUpperCase()}${col.slice(1)}_idx`;
+        code.push(
+          `DEFINE INDEX ${escapeIdent(idxName)} ON ${tableName} COLUMNS ${fieldName} UNIQUE;`,
+        );
+      } else if (field.references || fieldKey.toLowerCase().includes("id")) {
+        code.push(
+          `DEFINE INDEX ${escapeIdent(`${fieldName.replace(/`/g, "")}_idx`)} ON ${tableName} COLUMNS ${fieldName};`,
+        );
+      }
+    }
+
+    code.push("");
+  }
+
+  const suggested = file ? file.replace(/\.[^/.]+$/, ".surql") : ".better-auth/schema.surql";
+
+  return { code: code.join("\n"), path: suggested };
 };
