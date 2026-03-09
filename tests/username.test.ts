@@ -49,7 +49,7 @@ describe("Username Plugin Authentication Flow", () => {
   });
 
   afterAll(async () => {
-    await db.close();
+    if (db) await db.close();
   });
 
   it("signs up, saves username fields to the DB, and signs in successfully", async () => {

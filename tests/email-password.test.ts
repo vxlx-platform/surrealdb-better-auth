@@ -33,7 +33,7 @@ describe("E2E Authentication Flow & CRUD Validation", () => {
   });
 
   afterAll(async () => {
-    await db.close();
+    if (db) await db.close();
   });
 
   it("completes a full auth lifecycle and verifies database state", async () => {

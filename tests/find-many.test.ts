@@ -37,7 +37,7 @@ describe("Adapter findMany - Pagination, Sorting & Filtering", () => {
   });
 
   afterAll(async () => {
-    await db.close();
+    if (db) await db.close();
   });
 
   it("applies a strict limit to the result set", async () => {

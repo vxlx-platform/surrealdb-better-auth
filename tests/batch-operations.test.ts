@@ -21,7 +21,7 @@ describe("Adapter Batch Operations (updateMany & deleteMany)", () => {
   });
 
   afterAll(async () => {
-    await db.close();
+    if (db) await db.close();
   });
 
   describe("updateMany", () => {

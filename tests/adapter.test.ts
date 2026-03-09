@@ -21,7 +21,7 @@ describe("surrealdb-adapter CRUD", () => {
   });
 
   afterAll(async () => {
-    await db.close();
+    if (db) await db.close();
   });
 
   it("creates a user record and returns a normalized id", async () => {

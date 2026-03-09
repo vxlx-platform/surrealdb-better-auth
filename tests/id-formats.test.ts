@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Surreal } from "surrealdb";
 import { buildAdapter, ensureSchema, truncateAuthTables } from "./test-utils";
 
@@ -9,11 +9,18 @@ const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
 const RANDOM_ID_REGEX = /^[a-zA-Z0-9]+$/;
 
 describe("Record ID Formats Configuration", () => {
-  let db: Surreal;
+  let db: Surreal | undefined;
 
   beforeEach(async () => {
     // We handle truncation within the tests if db is initialized,
     // but the tests build their own adapters so we will truncate after build.
+  });
+
+  afterEach(async () => {
+    if (db) {
+      await db.close();
+      db = undefined;
+    }
   });
 
   afterAll(async () => {

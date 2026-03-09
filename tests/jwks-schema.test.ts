@@ -4,7 +4,7 @@ import { jwt } from "better-auth/plugins";
 import type { Surreal } from "surrealdb";
 import type { DBAdapter } from "@better-auth/core/db/adapter";
 
-import { buildAdapter, ensureSchema, truncateAuthTables, createTestDb } from "./test-utils";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "./test-utils";
 import type { JWKSRow } from "../src/types";
 
 describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
@@ -13,10 +13,6 @@ describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
   let authConfig: BetterAuthOptions;
 
   beforeAll(async () => {
-    const { db } = await createTestDb();
-    masterDb = db;
-    await truncateAuthTables(masterDb);
-
     // Build the adapter with the exact JWT configuration
     const built = await buildAdapter(
       { debugLogs: false },
@@ -33,9 +29,16 @@ describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
       },
     );
 
+    masterDb = built.db;
+    await truncateAuthTables(masterDb);
+
     adapter = built.adapter;
     authConfig = built.builtConfig;
-  });
+
+    // Ensure plugin-dependent tables (including jwks) exist for endpoint tests.
+    await ensureSchema(masterDb, adapter, authConfig);
+    await masterDb.query("DELETE jwks").catch(() => {});
+  }, 60_000);
 
   afterAll(async () => {
     if (masterDb) {

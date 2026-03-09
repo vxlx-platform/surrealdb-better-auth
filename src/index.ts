@@ -273,6 +273,24 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
       };
 
       /**
+       * SurrealDB expects `NONE` for option-field clears (not SQL NULL).
+       * The client serializer emits `NONE` for `undefined`, so we normalize
+       * incoming `null` values to `undefined` before writes.
+       */
+      const normalizeNullToNone = (value: unknown): unknown => {
+        if (value === null) return undefined;
+        if (Array.isArray(value)) return value.map((entry) => normalizeNullToNone(entry));
+        if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+          const normalized: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(value)) {
+            normalized[k] = normalizeNullToNone(v);
+          }
+          return normalized;
+        }
+        return value;
+      };
+
+      /**
        * Runtime type guard for distinguishing a table target from explicit record targets.
        */
       const isTableTarget = (target: QueryTarget): target is Table => target instanceof Table;
@@ -495,7 +513,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         create: async <T>({ model, data }: { model: string; data: T }): Promise<T> => {
           const tableName = getModelName(model);
           const payload = data as Record<string, unknown>;
-          const content = stripIdFromPayload(payload);
+          const content = normalizeNullToNone(stripIdFromPayload(payload));
 
           const rawId = payload.id;
 
@@ -604,7 +622,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         }): Promise<T | null> => {
           const tableName = getModelName(model);
           const { target, rest = [] } = splitIdWhere(tableName, where);
-          const patch = stripIdFromPayload(update as Record<string, unknown>);
+          const patch = normalizeNullToNone(stripIdFromPayload(update as Record<string, unknown>));
 
           const query = makeTargetQuery(
             (tb) => `UPDATE ${escapeIdent(tb)}`,
@@ -630,7 +648,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         }): Promise<number> => {
           const tableName = getModelName(model);
           const { target, rest } = splitIdWhere(tableName, where);
-          const patch = stripIdFromPayload(update);
+          const patch = normalizeNullToNone(stripIdFromPayload(update));
 
           const query = makeTargetQuery(
             (tb) => `RETURN array::len((UPDATE ${escapeIdent(tb)}`,
