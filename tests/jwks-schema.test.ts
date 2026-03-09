@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { betterAuth, type BetterAuthOptions } from "better-auth";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { type BetterAuthOptions } from "better-auth";
 import { jwt } from "better-auth/plugins";
 import type { Surreal } from "surrealdb";
 import type { DBAdapter } from "@better-auth/core/db/adapter";
@@ -9,6 +9,7 @@ import type { JWKSRow } from "../src/types";
 
 describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
   let masterDb: Surreal;
+  let auth: Awaited<ReturnType<typeof buildAdapter>>["auth"];
   let adapter: DBAdapter;
   let authConfig: BetterAuthOptions;
 
@@ -30,15 +31,19 @@ describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
     );
 
     masterDb = built.db;
-    await truncateAuthTables(masterDb);
+    auth = built.auth;
 
     adapter = built.adapter;
     authConfig = built.builtConfig;
 
     // Ensure plugin-dependent tables (including jwks) exist for endpoint tests.
     await ensureSchema(masterDb, adapter, authConfig);
-    await masterDb.query("DELETE jwks").catch(() => {});
   }, 60_000);
+
+  beforeEach(async () => {
+    await truncateAuthTables(masterDb);
+    await masterDb.query("DELETE jwks").catch(() => {});
+  });
 
   afterAll(async () => {
     if (masterDb) {
@@ -63,7 +68,6 @@ describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
   });
 
   it("should return 200 and a valid JWKS response for the jwks endpoint", async () => {
-    const auth = betterAuth(authConfig);
     const response = await auth.handler(
       new Request("http://localhost/api/auth/.well-known", { method: "GET" }),
     );
@@ -75,15 +79,7 @@ describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
   });
 
   it("persists the generated JWKS key pair to the SurrealDB database", async () => {
-    // 1. Truncate existing JWKS records and apply schema
-    await masterDb.query("DELETE jwks");
-    await ensureSchema(masterDb, adapter, authConfig);
-
-    // 2. Initialize a fresh Better Auth instance with the JWKS config.
-    // This will trigger the key generation and persistence because the table now exists.
-    const auth = betterAuth(authConfig);
-
-    // 3. Hit the JWKS endpoint via the handler and capture the response
+    // Hit the JWKS endpoint via the handler to trigger key generation/persistence.
     const response = await auth.handler(
       new Request("http://localhost/api/auth/.well-known", { method: "GET" }),
     );
@@ -101,7 +97,7 @@ describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
     });
 
     // 5. Assertions
-    expect(jwksRecords.length).toBeGreaterThanOrEqual(1);
+    expect(jwksRecords).toHaveLength(1);
 
     const activeKey = jwksRecords[0];
     expect(activeKey).toBeDefined();
