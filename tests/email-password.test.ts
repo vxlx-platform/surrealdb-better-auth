@@ -36,6 +36,19 @@ describe("E2E Authentication Flow & CRUD Validation", () => {
     if (db) await db.close();
   });
 
+  async function createSessionHeaders(email: string, password: string) {
+    const signIn = await auth.api.signInEmail({
+      body: {
+        email,
+        password,
+      },
+    });
+
+    const ctx = await auth.$context;
+
+    return ctx.test.getAuthHeaders({ userId: signIn.user.id });
+  }
+
   it("completes a full auth lifecycle and verifies database state", async () => {
     const mockUser = {
       name: "E2E Test User",
@@ -187,5 +200,50 @@ describe("E2E Authentication Flow & CRUD Validation", () => {
         },
       }),
     ).rejects.toThrow();
+  });
+
+  it("allows a user to update their own password via changePassword", async () => {
+    const email = "change-password@example.com";
+    const currentPassword = "CurrentPassword123!";
+    const newPassword = "UpdatedPassword123!";
+
+    const signUp = await auth.api.signUpEmail({
+      body: {
+        name: "Password Changer",
+        email,
+        password: currentPassword,
+      },
+    });
+
+    const userHeaders = await createSessionHeaders(email, currentPassword);
+
+    const changed = await auth.api.changePassword({
+      headers: userHeaders,
+      body: {
+        currentPassword,
+        newPassword,
+        revokeOtherSessions: true,
+      },
+    });
+    expect(changed.token).toBeDefined();
+    expect(changed.user.id).toBe(signUp.user.id);
+
+    await expect(
+      auth.api.signInEmail({
+        body: {
+          email,
+          password: currentPassword,
+        },
+      }),
+    ).rejects.toThrow();
+
+    const nextSignIn = await auth.api.signInEmail({
+      body: {
+        email,
+        password: newPassword,
+      },
+    });
+    expect(nextSignIn.user.id).toBe(signUp.user.id);
+    expect(nextSignIn.token).toBeDefined();
   });
 });

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { betterAuth } from "better-auth";
-import { admin } from "better-auth/plugins";
+import { admin, testUtils } from "better-auth/plugins";
 import { adminAc, userAc } from "better-auth/plugins/admin/access";
 import type { Surreal } from "surrealdb";
 import type { DBAdapter } from "@better-auth/core/db/adapter";
@@ -21,6 +21,7 @@ const _getAuthType = () =>
           admin: adminAc,
         },
       }),
+      testUtils(),
     ],
   });
 
@@ -48,6 +49,7 @@ describe("Admin Plugin - Adapter Integration", () => {
               admin: adminAc,
             },
           }),
+          testUtils(),
         ],
       },
     );
@@ -68,17 +70,6 @@ describe("Admin Plugin - Adapter Integration", () => {
     if (db) await db.close();
   });
 
-  function cookieHeaderFromSetCookie(setCookie: string | null): string {
-    if (!setCookie) {
-      throw new Error("Missing Set-Cookie header from sign-in response");
-    }
-    return setCookie
-      .split(",")
-      .map((chunk) => chunk.trim().split(";")[0])
-      .filter(Boolean)
-      .join("; ");
-  }
-
   async function createAdminSessionHeaders() {
     const adminEmail = "admin@example.com";
     const adminPassword = "Password123!";
@@ -98,17 +89,8 @@ describe("Admin Plugin - Adapter Integration", () => {
       update: { role: "admin", updatedAt: new Date() },
     });
 
-    const signInResponse = (await auth.api.signInEmail({
-      asResponse: true,
-      body: {
-        email: adminEmail,
-        password: adminPassword,
-      },
-    } as any)) as Response;
-
-    return {
-      cookie: cookieHeaderFromSetCookie(signInResponse.headers.get("set-cookie")),
-    };
+    const ctx = await auth.$context;
+    return ctx.test.getAuthHeaders({ userId: signUp.user.id });
   }
 
   it("generates admin user fields in schema output", async () => {
@@ -205,4 +187,48 @@ describe("Admin Plugin - Adapter Integration", () => {
     expect(unbannedUser).not.toBeNull();
     expect(unbannedUser?.banned).toBe(false);
   }, 60_000);
+
+  it("allows admin to reset another user's password via setUserPassword", async () => {
+    const adminHeaders = await createAdminSessionHeaders();
+
+    const targetEmail = "reset-target@example.com";
+    const oldPassword = "OldPassword123!";
+    const newPassword = "NewPassword123!";
+
+    const created = await auth.api.signUpEmail({
+      body: {
+        name: "Reset Target",
+        email: targetEmail,
+        password: oldPassword,
+      },
+    });
+
+    const resetResult = await auth.api.setUserPassword({
+      headers: adminHeaders,
+      body: {
+        userId: created.user.id,
+        newPassword,
+      },
+    });
+    expect(resetResult.status).toBe(true);
+
+    await expect(
+      auth.api.signInEmail({
+        body: {
+          email: targetEmail,
+          password: oldPassword,
+        },
+      }),
+    ).rejects.toThrow();
+
+    const newSignIn = await auth.api.signInEmail({
+      body: {
+        email: targetEmail,
+        password: newPassword,
+      },
+    });
+    expect(newSignIn.user.id).toBe(created.user.id);
+    expect(newSignIn.token).toBeDefined();
+  });
+
 });
