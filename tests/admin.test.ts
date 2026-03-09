@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { betterAuth } from "better-auth";
 import { admin } from "better-auth/plugins";
+import { adminAc, userAc } from "better-auth/plugins/admin/access";
 import type { Surreal } from "surrealdb";
 import type { DBAdapter } from "@better-auth/core/db/adapter";
 
@@ -10,7 +11,17 @@ const _getAuthType = () =>
   betterAuth({
     database: {} as any,
     emailAndPassword: { enabled: true },
-    plugins: [admin()],
+    plugins: [
+      admin({
+        defaultRole: "user",
+        adminRoles: ["admin"],
+        roles: {
+          user: userAc,
+          creator: userAc,
+          admin: adminAc,
+        },
+      }),
+    ],
   });
 
 type AuthWithAdmin = ReturnType<typeof _getAuthType>;
@@ -27,7 +38,17 @@ describe("Admin Plugin - Adapter Integration", () => {
       {
         baseURL: "http://localhost",
         emailAndPassword: { enabled: true },
-        plugins: [admin()],
+        plugins: [
+          admin({
+            defaultRole: "user",
+            adminRoles: ["admin"],
+            roles: {
+              user: userAc,
+              creator: userAc,
+              admin: adminAc,
+            },
+          }),
+        ],
       },
     );
 
@@ -100,13 +121,21 @@ describe("Admin Plugin - Adapter Integration", () => {
     expect(sql).toContain("DEFINE FIELD banExpires ON user TYPE");
   });
 
-  it("supports listUsers, setRole, banUser, and unbanUser", async () => {
+  it("supports listUsers, setRole for user/creator/admin, banUser, and unbanUser", async () => {
     const adminHeaders = await createAdminSessionHeaders();
 
     const regularUser = await auth.api.signUpEmail({
       body: {
         name: "Regular User",
         email: "regular@example.com",
+        password: "Password123!",
+      },
+    });
+
+    const creatorUser = await auth.api.signUpEmail({
+      body: {
+        name: "Creator User",
+        email: "creator@example.com",
         password: "Password123!",
       },
     });
@@ -126,6 +155,7 @@ describe("Admin Plugin - Adapter Integration", () => {
     });
     expect(setAdminRoleResult.user.role).toBe("admin");
 
+    // set user role back to user
     const setUserRoleResult = await auth.api.setRole({
       headers: adminHeaders,
       body: {
@@ -133,8 +163,17 @@ describe("Admin Plugin - Adapter Integration", () => {
         role: "user",
       },
     });
-
     expect(setUserRoleResult.user.role).toBe("user");
+
+    // set creator role
+    const setCreatorRoleResult = await auth.api.setRole({
+      headers: adminHeaders,
+      body: {
+        userId: creatorUser.user.id,
+        role: "creator",
+      },
+    });
+    expect(setCreatorRoleResult.user.role).toBe("creator");
 
     await auth.api.banUser({
       headers: adminHeaders,
