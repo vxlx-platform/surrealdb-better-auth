@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BetterAuthDBSchema } from "better-auth";
 
-import { generateSurqlSchema } from "../src/index";
+import { generateSurqlSchema } from "../../src/index";
 
 describe("Adapter Schema Generation (createSchema)", () => {
   const getModelName = (name: string) => name;

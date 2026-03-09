@@ -3,34 +3,19 @@ import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { testUtils } from "better-auth/plugins";
 import { Surreal } from "surrealdb";
 
+import { AUTH_TABLES, truncateTables } from "./__helpers__/db";
+import { getScopedDbName, getTestDbEnv } from "./__helpers__/env";
 import { surrealAdapter, type SurrealAdapterConfig } from "../src";
 
-function getTestDbScope() {
-  const fixedNamespace = process.env.SURREALDB_TEST_NAMESPACE ?? "main";
-  const fixedDatabase = process.env.SURREALDB_TEST_DATABASE ?? "main";
-  const isolate = process.env.SURREALDB_TEST_ISOLATE === "1";
-
-  if (!isolate) {
-    return {
-      namespace: fixedNamespace,
-      database: fixedDatabase,
-    };
-  }
-
-  // Optional worker isolation for parallel test runs.
-  const workerId = process.env.VITEST_POOL_ID ?? process.env.VITEST_WORKER_ID ?? "local";
-  return {
-    namespace: `${fixedNamespace}_${workerId}`,
-    database: `${fixedDatabase}_${workerId}`,
-  };
-}
-
 export async function createTestDb() {
+  const env = getTestDbEnv();
   const db = new Surreal();
-  const { namespace, database } = getTestDbScope();
-  await db.connect("ws://localhost:8000/rpc");
-  await db.signin({ username: "root", password: "root" });
-  await db.use({ namespace, database });
+  await db.connect(env.endpoint);
+  await db.signin({ username: env.username, password: env.password });
+  await db.use({
+    namespace: getScopedDbName(env.namespace),
+    database: getScopedDbName(env.database),
+  });
   return { db };
 }
 
@@ -77,11 +62,5 @@ export async function ensureSchema(
 }
 
 export async function truncateAuthTables(db: Surreal) {
-  for (const table of ["session", "account", "verification", "user"]) {
-    try {
-      await db.query(`DELETE ${table}`);
-    } catch {
-      // Ignore missing table errors when schema has not been applied yet.
-    }
-  }
+  await truncateTables(db, AUTH_TABLES);
 }

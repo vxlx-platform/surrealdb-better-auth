@@ -4,7 +4,7 @@ import { username } from "better-auth/plugins";
 import type { Surreal } from "surrealdb";
 import type { DBAdapter } from "@better-auth/core/db/adapter";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "./test-utils";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
 
 // 1. Create a dummy auth configuration purely for strict type inference.
 // We use 'as any' ONLY for the dummy database since it never runs.

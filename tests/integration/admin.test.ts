@@ -5,7 +5,7 @@ import { adminAc, userAc } from "better-auth/plugins/admin/access";
 import type { Surreal } from "surrealdb";
 import type { DBAdapter } from "@better-auth/core/db/adapter";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "./test-utils";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
 
 const _getAuthType = () =>
   betterAuth({

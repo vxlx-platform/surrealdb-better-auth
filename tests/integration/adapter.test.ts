@@ -2,8 +2,9 @@ import type { DBAdapter } from "@better-auth/core/db/adapter";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Surreal } from "surrealdb";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "./test-utils";
-import type { UserRow } from "../src/types";
+import { makeUserSeed } from "../__helpers__/factory";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
+import type { UserRow } from "../../src/types";
 
 describe("surrealdb-adapter CRUD", () => {
   let db: Surreal;
@@ -25,24 +26,18 @@ describe("surrealdb-adapter CRUD", () => {
   });
 
   it("creates a user record and returns a normalized id", async () => {
-    const now = new Date();
+    const seed = makeUserSeed({ emailVerified: true });
 
     const result = await adapter.create<UserRow>({
       model: "user",
-      data: {
-        name: "Test User",
-        email: "test@example.com",
-        emailVerified: true,
-        createdAt: now,
-        updatedAt: now,
-      },
+      data: seed,
     });
 
     expect(result).toBeDefined();
     expect(result.id).toEqual(expect.any(String));
     expect(result.id).not.toMatch(/^user:/);
-    expect(result.name).toBe("Test User");
-    expect(result.email).toBe("test@example.com");
+    expect(result.name).toBe(seed.name);
+    expect(result.email).toBe(seed.email);
     expect(result.emailVerified).toBe(true);
   });
 

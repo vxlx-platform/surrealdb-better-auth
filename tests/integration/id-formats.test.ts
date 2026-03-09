@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Surreal } from "surrealdb";
-import { buildAdapter, ensureSchema, truncateAuthTables } from "./test-utils";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
 
 // Regex patterns for strict ID format validation
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

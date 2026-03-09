@@ -4,7 +4,7 @@ import { emailOTP } from "better-auth/plugins";
 import type { Surreal } from "surrealdb";
 import type { DBAdapter } from "@better-auth/core/db/adapter";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "./test-utils";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
 
 const _getAuthType = () =>
   betterAuth({

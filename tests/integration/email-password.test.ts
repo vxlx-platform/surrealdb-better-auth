@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Surreal } from "surrealdb";
 import type { DBAdapter } from "@better-auth/core/db/adapter";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "./test-utils";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
 
 describe("E2E Authentication Flow & CRUD Validation", () => {
   let db: Surreal;

@@ -4,8 +4,8 @@ import { jwt } from "better-auth/plugins";
 import type { Surreal } from "surrealdb";
 import type { DBAdapter } from "@better-auth/core/db/adapter";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "./test-utils";
-import type { JWKSRow } from "../src/types";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
+import type { JWKSRow } from "../../src/types";
 
 describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
   let masterDb: Surreal;
