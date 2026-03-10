@@ -11,4 +11,3 @@ export async function truncateTables(db: Surreal, tables: readonly string[]) {
     }
   }
 }
-

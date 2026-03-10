@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "description": "SurrealDB adapter for Better Auth",
   "type": "module",
-  "main": "./dist/src/index.js",
-  "types": "./dist/src/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
-      "import": "./dist/src/index.js",
-      "default": "./dist/src/index.js"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "files": [
@@ -22,13 +22,16 @@
     "test:integration": "vitest run tests/integration"
   },
   "dependencies": {
-    "better-auth": "catalog:",
-    "surrealdb": "catalog:"
+    "better-auth": "^1.5.4",
+    "surrealdb": "^2.0.2"
   },
   "devDependencies": {
-    "@vxlx/config": "workspace:*",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "@types/node": "^25.4.0",
+    "oxfmt": "^0.37.0",
+    "oxlint": "^1.52.0",
+    "oxlint-tsgolint": "^0.16.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   },
   "publishConfig": {
     "access": "public"

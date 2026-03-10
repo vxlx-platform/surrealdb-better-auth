@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Surreal } from "surrealdb";
 import type { DBAdapter } from "@better-auth/core/db/adapter";
+import type { Surreal } from "surrealdb";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
 

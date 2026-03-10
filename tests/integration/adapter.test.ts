@@ -1,10 +1,10 @@
 import type { DBAdapter } from "@better-auth/core/db/adapter";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Surreal } from "surrealdb";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import type { UserRow } from "../../src/types";
 import { makeUserSeed } from "../__helpers__/factory";
 import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
-import type { UserRow } from "../../src/types";
 
 describe("surrealdb-adapter CRUD", () => {
   let db: Surreal;

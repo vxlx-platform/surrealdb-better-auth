@@ -1,13 +1,16 @@
-import {
-  createAdapterFactory,
-  type DBAdapterDebugLogOption,
-  type Where,
-} from "better-auth/adapters";
 import { type BetterAuthDBSchema } from "better-auth";
 import {
+  type DBAdapterDebugLogOption,
+  type Where,
+  createAdapterFactory,
+} from "better-auth/adapters";
+import {
   BoundQuery,
+  type Expr,
+  type ExprLike,
   RecordId,
   StringRecordId,
+  type Surreal,
   Table,
   Uuid,
   and,
@@ -23,9 +26,6 @@ import {
   or,
   surql,
   u,
-  type Expr,
-  type ExprLike,
-  type Surreal,
 } from "surrealdb";
 
 /**

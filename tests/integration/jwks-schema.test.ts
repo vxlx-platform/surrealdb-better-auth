@@ -1,11 +1,11 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { DBAdapter } from "@better-auth/core/db/adapter";
 import { type BetterAuthOptions } from "better-auth";
 import { jwt } from "better-auth/plugins";
 import type { Surreal } from "surrealdb";
-import type { DBAdapter } from "@better-auth/core/db/adapter";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
 import type { JWKSRow } from "../../src/types";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
 
 describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
   let masterDb: Surreal;

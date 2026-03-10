@@ -1,5 +1,6 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Surreal } from "surrealdb";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+
 import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
 
 // Regex patterns for strict ID format validation

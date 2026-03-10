@@ -1,11 +1,11 @@
 import type { DBAdapter, DBAdapterInstance } from "@better-auth/core/db/adapter";
-import { betterAuth, type BetterAuthOptions } from "better-auth";
+import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { testUtils } from "better-auth/plugins";
 import { Surreal } from "surrealdb";
 
+import { type SurrealAdapterConfig, surrealAdapter } from "../src";
 import { AUTH_TABLES, truncateTables } from "./__helpers__/db";
 import { getScopedDbName, getTestDbEnv } from "./__helpers__/env";
-import { surrealAdapter, type SurrealAdapterConfig } from "../src";
 
 export async function createTestDb() {
   const env = getTestDbEnv();
@@ -25,7 +25,9 @@ export async function buildAdapter(
 ) {
   const { db } = await createTestDb();
   const inputPlugins = authOptions?.plugins ?? [];
-  const hasTestUtils = inputPlugins.some((plugin) => (plugin as { id?: string })?.id === "test-utils");
+  const hasTestUtils = inputPlugins.some(
+    (plugin) => (plugin as { id?: string })?.id === "test-utils",
+  );
 
   const auth = betterAuth({
     ...authOptions,
