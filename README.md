@@ -61,7 +61,7 @@ import { surrealAdapter, type SurrealAdapterConfig } from "@vxlx/surrealdb-bette
 const config: SurrealAdapterConfig = {
   usePlural: false,
   debugLogs: false,
-  recordIdFormat: "random", // "random" | "ulid" | "uuidv7" | (tableName) => ...
+  recordIdFormat: "native", // "native" | "ulid" | "uuidv7" | (tableName) => ...
 };
 
 const adapter = surrealAdapter(db, config);
@@ -82,7 +82,7 @@ surrealAdapter(db, {
   recordIdFormat: (tableName) => {
     if (tableName === "user") return "uuidv7";
     if (tableName === "account") return "ulid";
-    return "random";
+    return "native";
   },
 });
 ```
@@ -143,6 +143,7 @@ bun run test
 Note: Integration tests require a local SurrealDB instance reachable at `ws://localhost:8000/rpc` with credentials used in the test helpers.
 
 Test DB scope can be configured with:
+
 - `SURREALDB_TEST_NAMESPACE` (default: `main`)
 - `SURREALDB_TEST_DATABASE` (default: `main`)
 - `SURREALDB_TEST_ISOLATE=1` to append worker ids for parallel isolation
