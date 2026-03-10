@@ -4,6 +4,9 @@ SurrealDB adapter for [Better Auth](https://www.better-auth.com/) built for the 
 
 This adapter treats Better Auth `id` values as SurrealDB record id components (`table:id`) instead of a persisted `id` column.
 
+- npm: [`@vxlx/surrealdb-better-auth`](https://www.npmjs.com/package/@vxlx/surrealdb-better-auth)
+- repository: [vxlx-platform/surrealdb-better-auth](https://github.com/vxlx-platform/surrealdb-better-auth)
+
 ## Why this adapter
 
 If you're using Better Auth with the SurrealDB JavaScript SDK v2 client, this adapter gives you a native integration layer instead of forcing a SQL-style adapter shape onto SurrealDB.

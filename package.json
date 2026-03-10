@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "SurrealDB adapter for Better Auth",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vxlx-platform/surrealdb-better-auth.git"
+  },
+  "homepage": "https://github.com/vxlx-platform/surrealdb-better-auth#readme",
+  "bugs": {
+    "url": "https://github.com/vxlx-platform/surrealdb-better-auth/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
