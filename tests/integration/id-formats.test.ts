@@ -88,7 +88,7 @@ describe("Record ID Formats Configuration", () => {
 
   it("should create records with the default random format", async () => {
     const built = await buildAdapter(
-      { recordIdFormat: "random" },
+      { recordIdFormat: "native" },
       { emailAndPassword: { enabled: true } },
     );
     db = built.db;
@@ -118,7 +118,7 @@ describe("Record ID Formats Configuration", () => {
         recordIdFormat: (tableName) => {
           if (tableName === "user") return "uuidv7";
           if (tableName === "account") return "ulid";
-          return "random";
+          return "native";
         },
       },
       { emailAndPassword: { enabled: true } },

@@ -31,11 +31,11 @@ import {
 /**
  * Supported SurrealDB record-id generation formats when Better Auth does not supply an id.
  *
- * - `random`: SurrealDB default random IDs (CREATE table CONTENT ...).
+ * - `native`: SurrealDB default random IDs (CREATE table CONTENT ...).
  * - `ulid`: SurrealDB ULID IDs (CREATE table:ulid() CONTENT ...).
  * - `uuidv7`: SurrealDB UUIDv7 IDs (CREATE table:uuid() CONTENT ...).
  */
-export type RecordIdFormat = "random" | "ulid" | "uuidv7";
+export type RecordIdFormat = "native" | "ulid" | "uuidv7";
 
 /**
  * Configuration options for the SurrealDB Better Auth adapter.
@@ -55,7 +55,7 @@ export interface SurrealAdapterConfig {
    * Controls how SurrealDB generates record ids when Better Auth does not provide one.
    *
    * You can set a single default format:
-   * - `"random"` (default)
+   * - `"native"` (default)
    * - `"ulid"`
    * - `"uuidv7"`
    *
@@ -112,7 +112,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
   const resolveIdFormat = (tableName: string): RecordIdFormat => {
     const fmt = config?.recordIdFormat;
     if (typeof fmt === "function") return fmt(tableName);
-    return fmt ?? "random";
+    return fmt ?? "native";
   };
 
   /**
@@ -280,7 +280,11 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
       const normalizeNullToNone = (value: unknown): unknown => {
         if (value === null) return undefined;
         if (Array.isArray(value)) return value.map((entry) => normalizeNullToNone(entry));
-        if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+        if (
+          value &&
+          typeof value === "object" &&
+          Object.getPrototypeOf(value) === Object.prototype
+        ) {
           const normalized: Record<string, unknown> = {};
           for (const [k, v] of Object.entries(value)) {
             normalized[k] = normalizeNullToNone(v);
@@ -380,7 +384,11 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         } else if (fieldAttributes?.references && operator === "in" && Array.isArray(value)) {
           const refTable = fieldAttributes.references.model;
           value = value.map((entry) => {
-            if (typeof entry === "string" || typeof entry === "number" || typeof entry === "bigint") {
+            if (
+              typeof entry === "string" ||
+              typeof entry === "number" ||
+              typeof entry === "bigint"
+            ) {
               return new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(entry)));
             }
             return entry;
@@ -770,7 +778,9 @@ export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) =
       if (field.references) {
         type = `record<${escapeIdent(getModelName(field.references.model))}>`;
       } else if (!type) {
-        throw new Error(`Unsupported field type "${String(field.type)}" for ${table.modelName}.${dbFieldName}`);
+        throw new Error(
+          `Unsupported field type "${String(field.type)}" for ${table.modelName}.${dbFieldName}`,
+        );
       }
 
       if (!field.required) {
