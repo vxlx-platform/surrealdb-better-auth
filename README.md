@@ -102,7 +102,7 @@ const usersMatchingSearch = await adapter.findMany({
 ## Installation
 
 ```bash
-bun add @vxlx/surrealdb-better-auth better-auth surrealdb
+npm install @vxlx/surrealdb-better-auth better-auth surrealdb
 ```
 
 This package is intended for projects using the current `surrealdb` JavaScript SDK v2 package.
@@ -224,8 +224,8 @@ const result = await generateSurqlSchema({
 ## Development
 
 ```bash
-bun run build
-bun run test
+npm run build
+npm run test
 ```
 
 Note: Integration tests require a local SurrealDB instance reachable at `ws://localhost:8000/rpc`, accessed through the current SurrealDB JavaScript SDK v2 client and credentials used in the test helpers.

@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_integration:
+        description: Run integration tests
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-unit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Run unit tests
+        run: bun run test:unit
+
+  integration:
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.run_integration) || vars.RUN_INTEGRATION_TESTS == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Start SurrealDB
+        run: docker run -d --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root memory
+
+      - name: Wait for SurrealDB
+        run: |
+          for i in {1..30}; do
+            if nc -z 127.0.0.1 8000; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs surrealdb
+          exit 1
+
+      - name: Run integration tests
+        env:
+          SURREALDB_TEST_ENDPOINT: ws://127.0.0.1:8000/rpc
+          SURREALDB_TEST_USERNAME: root
+          SURREALDB_TEST_PASSWORD: root
+        run: bun run test:integration
+
+      - name: Show SurrealDB logs on failure
+        if: failure()
+        run: docker logs surrealdb

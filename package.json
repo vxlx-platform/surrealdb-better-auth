@@ -2,6 +2,7 @@
   "name": "@vxlx/surrealdb-better-auth",
   "version": "0.1.0",
   "description": "SurrealDB adapter for Better Auth",
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,6 +18,11 @@
   ],
   "scripts": {
     "build": "tsc",
+    "lint": "oxlint src tests vitest.config.ts",
+    "lint:fix": "oxlint --fix src tests vitest.config.ts",
+    "pack:check": "npm pack --dry-run",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run build && npm run test:unit",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration"
