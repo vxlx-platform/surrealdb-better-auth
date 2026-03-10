@@ -41,6 +41,8 @@
     "prepack": "npm run build",
     "prepublishOnly": "npm run build && npm run test:unit",
     "test": "vitest run",
+    "test:browser:setup": "playwright install chromium",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration"
   },
@@ -56,6 +58,7 @@
     "oxfmt": "^0.37.0",
     "oxlint": "^1.52.0",
     "oxlint-tsgolint": "^0.16.0",
+    "playwright": "^1.57.0",
     "surrealdb": "^2.0.2",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"

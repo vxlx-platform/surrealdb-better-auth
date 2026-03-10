@@ -3,7 +3,7 @@ import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { testUtils } from "better-auth/plugins";
 import { Surreal } from "surrealdb";
 
-import { executeSurqlSchema, type SurrealAdapterConfig, surrealAdapter } from "../src";
+import { type SurrealAdapterConfig, executeSurqlSchema, surrealAdapter } from "../src";
 import { AUTH_TABLES, truncateTables } from "./__helpers__/db";
 import { getScopedDbName, getTestDbEnv } from "./__helpers__/env";
 

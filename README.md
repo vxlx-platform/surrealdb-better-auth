@@ -304,6 +304,33 @@ Environment variables:
 - `SURREALDB_NAMESPACE`
 - `SURREALDB_DATABASE`
 
+## Browser Tests
+
+This repo keeps browser-focused checks separate from the main node/integration suite.
+
+Run them with:
+
+```bash
+  bun run test:browser:setup
+  bun run test:browser
+```
+
+The first command installs the local Playwright browser binary used by `@vitest/browser-playwright`. You only need to run it again when Playwright updates or the cached browser is removed.
+
+If Chromium is already installed for Playwright, you can run just:
+
+```bash
+bun run test:browser
+```
+
+Current browser coverage focuses on:
+
+- fetching `/.well-known` from a real browser context
+- sign-up and sign-in requests from a real browser context
+- session cookie reuse via `/api/auth/get-session`
+
+The browser suite starts the example Bun server automatically and proxies `/api/auth/*` through the Vitest browser server so requests stay same-origin for cookie testing.
+
 ### Standalone helper
 
 ```ts

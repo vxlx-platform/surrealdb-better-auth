@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `applySurqlSchema(...)` helper for explicitly generating and applying Better Auth schema to SurrealDB.
 - Migration CLI support so apps can run schema application explicitly via `bunx surrealdb-better-auth migrate --config ./auth.ts`.
 
+### Developer Experience
+
+- Added a minimal Bun server for live local verification of Better Auth routes and generated SurrealDB API endpoints.
+- Added browser-focused tests using `@vitest/browser-playwright` for `/.well-known`, sign-up/sign-in flows, and session cookie behavior.
+- Added live integration coverage for generated SurrealDB API endpoints using the local Bun server and SurrealDB HTTP API.
+
 ## [0.1.0] - 2026-03-10
 
 ### Added

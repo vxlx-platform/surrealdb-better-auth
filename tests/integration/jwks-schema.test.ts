@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { JWKSRow } from "../../src/types";
 import { getHttpApiBaseUrl, getSurrealHttpHeaders } from "../__helpers__/env";
 import { expectOkJson } from "../__helpers__/http";
-import { startTestServer, type TestServerHandle } from "../__helpers__/server";
+import { type TestServerHandle, startTestServer } from "../__helpers__/server";
 import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
 
 describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
@@ -135,10 +135,9 @@ describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
       signal: AbortSignal.timeout(5_000),
     });
 
-    const body = (await expectOkJson(
-      apiResponse,
-      "SurrealDB /jwks endpoint",
-    )) as Array<Record<string, unknown>>;
+    const body = (await expectOkJson(apiResponse, "SurrealDB /jwks endpoint")) as Array<
+      Record<string, unknown>
+    >;
     expect(Array.isArray(body)).toBe(true);
     expect(body).toHaveLength(1);
     expect(typeof body[0]?.publicKey).toBe("string");
