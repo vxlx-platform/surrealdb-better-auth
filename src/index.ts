@@ -1,4 +1,4 @@
-import { type BetterAuthDBSchema } from "better-auth";
+import { type BetterAuthDBSchema, type BetterAuthOptions } from "better-auth";
 import {
   type DBAdapterDebugLogOption,
   type Where,
@@ -38,6 +38,36 @@ import {
 export type RecordIdFormat = "native" | "ulid" | "uuidv7";
 
 /**
+ * Configuration for optional SurrealDB DEFINE API generation.
+ *
+ * Generated endpoints are read-only collection endpoints intended to be
+ * explicitly enabled when you want SurrealDB HTTP API access for Better Auth
+ * tables.
+ */
+export interface SurrealApiEndpointsConfig {
+  /**
+   * Base path under `/api/:ns/:db`.
+   *
+   * For example, `/better-auth` generates:
+   * - `/api/:ns/:db/better-auth/user`
+   * - `/api/:ns/:db/better-auth/session`
+   *
+   * Defaults to no prefix, which generates top-level endpoints such as:
+   * - `/api/:ns/:db/user`
+   * - `/api/:ns/:db/session`
+   */
+  basePath?: string;
+
+  /**
+   * Which Better Auth models should get DEFINE API endpoints.
+   *
+   * Defaults to `user`, `session`, `account`, and `jwks`.
+   */
+  models?: string[];
+
+}
+
+/**
  * Configuration options for the SurrealDB Better Auth adapter.
  */
 export interface SurrealAdapterConfig {
@@ -62,6 +92,12 @@ export interface SurrealAdapterConfig {
    * Or you can provide a function to control per-table behavior.
    */
   recordIdFormat?: RecordIdFormat | ((tableName: string) => RecordIdFormat);
+
+  /**
+   * Optionally generates SurrealDB `DEFINE API` endpoints for selected Better Auth tables
+   * as part of schema generation.
+   */
+  apiEndpoints?: boolean | SurrealApiEndpointsConfig;
 }
 
 /**
@@ -716,6 +752,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
             ...options,
             getModelName,
             getFieldName,
+            apiEndpoints: config?.apiEndpoints,
           });
         },
       };
@@ -731,6 +768,13 @@ export interface GenerateSurqlSchemaOptions {
   tables?: BetterAuthDBSchema;
   getModelName: (modelName: string) => string;
   getFieldName: (options: { field: string; model: string }) => string;
+  apiEndpoints?: boolean | SurrealApiEndpointsConfig;
+}
+
+export interface ApplySurqlSchemaOptions {
+  db: Surreal;
+  authOptions: BetterAuthOptions;
+  file?: string;
 }
 
 /**
@@ -739,15 +783,35 @@ export interface GenerateSurqlSchemaOptions {
  * This function is decoupled from the adapter factory to allow direct testing.
  */
 export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) => {
-  const { file, tables, getModelName, getFieldName } = options;
+  const { file, tables, getModelName, getFieldName, apiEndpoints } = options;
   const code: string[] = [];
+  const apiTableNames: string[] = [];
+  const resolvedApiConfig =
+    apiEndpoints === true
+      ? {}
+      : apiEndpoints && typeof apiEndpoints === "object"
+        ? apiEndpoints
+        : null;
+  const apiBasePath = (() => {
+    const raw = resolvedApiConfig?.basePath?.trim() || "";
+    const trimmed = raw.replace(/^\/+|\/+$/g, "");
+    return trimmed ? `/${trimmed}` : "";
+  })();
+  const apiModels = new Set(
+    resolvedApiConfig?.models?.length ? resolvedApiConfig.models : ["user", "session", "account", "jwks"],
+  );
 
   for (const tableKey in tables) {
     const table = tables[tableKey];
     if (!table) continue;
 
     const tableName = escapeIdent(getModelName(table.modelName));
+    const rawTableName = getModelName(table.modelName);
     code.push(`DEFINE TABLE ${tableName} SCHEMAFULL;`);
+
+    if (resolvedApiConfig && apiModels.has(table.modelName)) {
+      apiTableNames.push(rawTableName);
+    }
 
     for (const fieldKey in table.fields) {
       const field = table.fields[fieldKey];
@@ -806,7 +870,54 @@ export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) =
     code.push("");
   }
 
+  if (resolvedApiConfig) {
+    for (const tableName of apiTableNames) {
+      const path = `${apiBasePath}/${tableName}`;
+      const escapedTable = escapeIdent(tableName);
+      code.push(`DEFINE API OVERWRITE "${path}"`);
+      code.push("  FOR get");
+      code.push("  THEN {");
+      code.push("    {");
+      code.push("      status: 200,");
+      code.push(`      body: SELECT * FROM ${escapedTable}`);
+      code.push("    }");
+      code.push("  }");
+      code.push(";");
+      code.push("");
+    }
+  }
+
   const suggested = file ? file.replace(/\.[^/.]+$/, ".surql") : ".better-auth/schema.surql";
 
   return { code: code.join("\n"), path: suggested };
+};
+
+/**
+ * Generates SurQL from a Better Auth configuration and applies it to the active
+ * SurrealDB connection.
+ */
+export const applySurqlSchema = async ({ db, authOptions, file }: ApplySurqlSchemaOptions) => {
+  const adapterFactory = authOptions.database as unknown as (input: {
+    plugins?: BetterAuthOptions["plugins"];
+  }) => {
+    createSchema?: (
+      options: BetterAuthOptions,
+      file?: string,
+    ) => Promise<{ code: string; path: string }>;
+  };
+
+  const adapter = adapterFactory({
+    plugins: authOptions.plugins,
+  });
+
+  if (!adapter.createSchema) {
+    throw new Error("The configured Better Auth adapter does not implement createSchema().");
+  }
+
+  const result = await adapter.createSchema(authOptions, file);
+  if (result.code.trim()) {
+    await db.query(result.code);
+  }
+
+  return result;
 };

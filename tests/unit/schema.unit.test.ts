@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { BetterAuthDBSchema } from "better-auth";
 
-import { generateSurqlSchema } from "../../src/index";
+import { applySurqlSchema, generateSurqlSchema } from "../../src/index";
 
 describe("Adapter Schema Generation (createSchema)", () => {
   const getModelName = (name: string) => name;
@@ -131,5 +131,72 @@ describe("Adapter Schema Generation (createSchema)", () => {
         getFieldName,
       }),
     ).rejects.toThrow(/Unsupported field type/);
+  });
+
+  it("optionally generates DEFINE API endpoints for supported auth tables", async () => {
+    const schema: BetterAuthDBSchema = {
+      user: {
+        modelName: "user",
+        fields: {
+          id: { type: "string", required: true },
+          email: { type: "string", required: true },
+        },
+      },
+      account: {
+        modelName: "account",
+        fields: {
+          id: { type: "string", required: true },
+          userId: {
+            type: "string",
+            required: true,
+            references: { model: "user", field: "id" },
+          },
+        },
+      },
+      verification: {
+        modelName: "verification",
+        fields: {
+          id: { type: "string", required: true },
+          value: { type: "string", required: true },
+        },
+      },
+    };
+
+    const result = await generateSurqlSchema({
+      file: "test.surql",
+      tables: schema,
+      getModelName,
+      getFieldName,
+      apiEndpoints: true,
+    });
+
+    const sql = result.code;
+
+    expect(sql).toContain('DEFINE API OVERWRITE "/user"');
+    expect(sql).toContain('DEFINE API OVERWRITE "/account"');
+    expect(sql).toContain("body: SELECT * FROM user");
+    expect(sql).toContain("body: SELECT * FROM account");
+    expect(sql).not.toContain('DEFINE API OVERWRITE "/verification"');
+  });
+
+  it("applies generated schema through the adapter createSchema hook", async () => {
+    const query = vi.fn(async () => []);
+    const code = "DEFINE TABLE user SCHEMAFULL;";
+
+    const result = await applySurqlSchema({
+      db: { query } as any,
+      authOptions: {
+        database: (() => ({
+          createSchema: async () => ({
+            code,
+            path: "better-auth-schema.surql",
+          }),
+        })) as any,
+        plugins: [],
+      } as any,
+    });
+
+    expect(result.code).toBe(code);
+    expect(query).toHaveBeenCalledWith(code);
   });
 });

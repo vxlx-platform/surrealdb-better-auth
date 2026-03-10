@@ -151,6 +151,7 @@ const config: SurrealAdapterConfig = {
   usePlural: false,
   debugLogs: false,
   recordIdFormat: "native", // "native" | "ulid" | "uuidv7" | (tableName) => ...
+  apiEndpoints: false,
 };
 
 const adapter = surrealAdapter(db, config);
@@ -184,9 +185,46 @@ surrealAdapter(db, {
 
 This lets Better Auth continue working with plain string ids while the SurrealDB JavaScript SDK v2 keeps native record semantics under the hood.
 
+## Optional DEFINE API Endpoints
+
+You can optionally include read-only `DEFINE API` endpoints for the Better Auth `user`, `session`, `account`, and `jwks` tables that exist in your schema.
+
+```ts
+surrealAdapter(db, {
+  apiEndpoints: {
+  },
+});
+```
+
+By default, this adds top-level collection endpoints such as:
+
+- `/api/:ns/:db/user`
+- `/api/:ns/:db/session`
+- `/api/:ns/:db/account`
+- `/api/:ns/:db/jwks` when the JWT plugin adds the `jwks` table
+
+If you prefer a prefix, set `basePath`:
+
+```ts
+surrealAdapter(db, {
+  apiEndpoints: {
+    basePath: "/better-auth",
+  },
+});
+```
+
+That generates:
+
+- `/api/:ns/:db/better-auth/user`
+- `/api/:ns/:db/better-auth/session`
+- `/api/:ns/:db/better-auth/account`
+- `/api/:ns/:db/better-auth/jwks`
+
+Generated endpoints are currently emitted without a `PERMISSIONS` clause for compatibility with the tested SurrealDB runtime.
+
 ## Schema Generation
 
-The adapter exposes Better Auth `createSchema` and a standalone helper.
+The adapter exposes Better Auth `createSchema`, a standalone helper, and an explicit schema-apply helper.
 
 ### Via Better Auth adapter instance
 
@@ -199,6 +237,47 @@ const result = await adapter.createSchema(builtConfig, "better-auth-schema.surql
 await db.query(result.code);
 ```
 
+### Apply schema programmatically
+
+```ts
+import { applySurqlSchema } from "@vxlx/surrealdb-better-auth";
+
+await applySurqlSchema({
+  db,
+  authOptions: auth.options,
+  file: "better-auth-schema.surql",
+});
+```
+
+### Run as a migration script
+
+Export both your Better Auth instance and connected Surreal client:
+
+```ts
+// auth.ts
+export { auth, db };
+```
+
+Then add a script in your app:
+
+```json
+{
+  "scripts": {
+    "migration": "bunx surrealdb-better-auth migrate --config ./auth.ts"
+  }
+}
+```
+
+The CLI looks for `auth` and `db` exports by default. If your exports use different names, pass them explicitly:
+
+```json
+{
+  "scripts": {
+    "migration": "bunx surrealdb-better-auth migrate --config ./auth.ts --auth myAuth --db myDB"
+  }
+}
+```
+
 ### Standalone helper
 
 ```ts
@@ -209,6 +288,8 @@ const result = await generateSurqlSchema({
   tables,
   getModelName,
   getFieldName,
+  apiEndpoints: {
+  },
 });
 
 // result.path -> "better-auth-schema.surql"
@@ -221,6 +302,7 @@ const result = await generateSurqlSchema({
 - `generateSurqlSchema(options)`
 - Types:
   - `SurrealAdapterConfig`
+  - `SurrealApiEndpointsConfig`
   - `RecordIdFormat`
   - `GenerateSurqlSchemaOptions`
 

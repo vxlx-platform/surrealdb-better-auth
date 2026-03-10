@@ -16,7 +16,10 @@ describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
   beforeAll(async () => {
     // Build the adapter with the exact JWT configuration
     const built = await buildAdapter(
-      { debugLogs: false },
+      {
+        debugLogs: false,
+        apiEndpoints: true,
+      },
       {
         emailAndPassword: { enabled: true },
         plugins: [
@@ -65,6 +68,7 @@ describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
     expect(sql).toContain("DEFINE FIELD publicKey ON jwks TYPE string;");
     expect(sql).toContain("DEFINE FIELD privateKey ON jwks TYPE string;");
     expect(sql).toContain("DEFINE FIELD createdAt ON jwks TYPE datetime;");
+    expect(sql).toContain('DEFINE API OVERWRITE "/jwks"');
   });
 
   it("should return 200 and a valid JWKS response for the jwks endpoint", async () => {
