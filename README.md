@@ -249,6 +249,8 @@ await applySurqlSchema({
 });
 ```
 
+`applySurqlSchema(...)` applies the generated SurQL statement-by-statement so repeated runs can update `DEFINE API OVERWRITE` endpoints without aborting on earlier `DEFINE TABLE ... already exists` errors.
+
 ### Run as a migration script
 
 Export both your Better Auth instance and connected Surreal client:
@@ -277,6 +279,30 @@ The CLI looks for `auth` and `db` exports by default. If your exports use differ
   }
 }
 ```
+
+### Quick Bun server for local testing
+
+This repo also includes a minimal Bun server you can use to verify the live Better Auth routes and the generated SurrealDB `DEFINE API` endpoints against a local database:
+
+```bash
+bun run dev:server
+```
+
+Defaults:
+
+- Better Auth base: `http://localhost:3000/api/auth`
+- JWKS route: `http://localhost:3000/api/auth/.well-known`
+- SurrealDB WS endpoint: `ws://localhost:8000/rpc`
+- SurrealDB API endpoint base: `http://localhost:8000/api/main/main`
+
+Environment variables:
+
+- `PORT`
+- `SURREALDB_ENDPOINT`
+- `SURREALDB_USERNAME`
+- `SURREALDB_PASSWORD`
+- `SURREALDB_NAMESPACE`
+- `SURREALDB_DATABASE`
 
 ### Standalone helper
 

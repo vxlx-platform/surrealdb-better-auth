@@ -777,6 +777,26 @@ export interface ApplySurqlSchemaOptions {
   file?: string;
 }
 
+const splitSurqlStatements = (code: string): string[] =>
+  code
+    .split(/;\s*(?:\n|$)/)
+    .map((statement) => statement.trim())
+    .filter(Boolean)
+    .map((statement) => `${statement};`);
+
+export const executeSurqlSchema = async (db: Surreal, code: string) => {
+  for (const statement of splitSurqlStatements(code)) {
+    try {
+      await db.query(statement);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/already exists/i.test(message)) {
+        throw error;
+      }
+    }
+  }
+};
+
 /**
  * Returns a SurQL schema string based on the provided Better Auth schema.
  *
@@ -876,6 +896,8 @@ export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) =
       const escapedTable = escapeIdent(tableName);
       code.push(`DEFINE API OVERWRITE "${path}"`);
       code.push("  FOR get");
+      code.push("  MIDDLEWARE");
+      code.push('    api::res::body("json")');
       code.push("  THEN {");
       code.push("    {");
       code.push("      status: 200,");
@@ -916,7 +938,7 @@ export const applySurqlSchema = async ({ db, authOptions, file }: ApplySurqlSche
 
   const result = await adapter.createSchema(authOptions, file);
   if (result.code.trim()) {
-    await db.query(result.code);
+    await executeSurqlSchema(db, result.code);
   }
 
   return result;

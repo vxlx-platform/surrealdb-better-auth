@@ -26,3 +26,27 @@ export function getScopedDbName(base: string): string {
   return `${base}_${workerId}`;
 }
 
+export function getHttpApiBaseUrl(): string {
+  const env = getTestDbEnv();
+  const url = new URL(env.endpoint);
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+  url.pathname = `/api/${getScopedDbName(env.namespace)}/${getScopedDbName(env.database)}`;
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
+export function getBasicAuthHeader(): string {
+  const env = getTestDbEnv();
+  return `Basic ${Buffer.from(`${env.username}:${env.password}`).toString("base64")}`;
+}
+
+export function getSurrealHttpHeaders(): Record<string, string> {
+  const env = getTestDbEnv();
+  return {
+    authorization: getBasicAuthHeader(),
+    accept: "application/json",
+    "surreal-ns": getScopedDbName(env.namespace),
+    "surreal-db": getScopedDbName(env.database),
+  };
+}

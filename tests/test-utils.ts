@@ -3,7 +3,7 @@ import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { testUtils } from "better-auth/plugins";
 import { Surreal } from "surrealdb";
 
-import { type SurrealAdapterConfig, surrealAdapter } from "../src";
+import { executeSurqlSchema, type SurrealAdapterConfig, surrealAdapter } from "../src";
 import { AUTH_TABLES, truncateTables } from "./__helpers__/db";
 import { getScopedDbName, getTestDbEnv } from "./__helpers__/env";
 
@@ -53,14 +53,7 @@ export async function ensureSchema(
 
   if (!result?.code) return;
 
-  try {
-    await db.query(result.code);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/already exists/i.test(message)) {
-      throw error;
-    }
-  }
+  await executeSurqlSchema(db, result.code);
 }
 
 export async function truncateAuthTables(db: Surreal) {
