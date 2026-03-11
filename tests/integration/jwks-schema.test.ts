@@ -4,7 +4,7 @@ import { jwt } from "better-auth/plugins";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import type { JWKSRow } from "../../src/types";
+import type { JWKSRow } from "../types";
 import { getHttpApiBaseUrl, getSurrealHttpHeaders } from "../__helpers__/env";
 import { expectOkJson } from "../__helpers__/http";
 import { type TestServerHandle, startTestServer } from "../__helpers__/server";
