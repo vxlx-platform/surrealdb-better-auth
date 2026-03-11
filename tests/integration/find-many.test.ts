@@ -124,6 +124,74 @@ describe("Adapter findMany - Pagination, Sorting & Filtering", () => {
     expect(results[1]!.name as string).toBe("Diana");
   });
 
+  it('filters records using the "ne" operator', async () => {
+    const results = await adapter.findMany<Record<string, unknown>>({
+      model: "user",
+      where: [{ field: "email", operator: "ne", value: "alice@example.com" }],
+      sortBy: { field: "name", direction: "asc" },
+    });
+
+    expect(results).toHaveLength(4);
+    expect(results.map((user) => user.name)).toEqual(["Bob", "Charlie", "Diana", "Eve"]);
+  });
+
+  it('filters records using the "gt" operator', async () => {
+    const results = await adapter.findMany<Record<string, unknown>>({
+      model: "user",
+      where: [{ field: "createdAt", operator: "gt", value: new Date("2024-01-03") }],
+      sortBy: { field: "createdAt", direction: "asc" },
+    });
+
+    expect(results).toHaveLength(2);
+    expect(results.map((user) => user.name)).toEqual(["Diana", "Eve"]);
+  });
+
+  it('filters records using the "starts_with" operator', async () => {
+    const results = await adapter.findMany<Record<string, unknown>>({
+      model: "user",
+      where: [{ field: "email", operator: "starts_with", value: "char" }],
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]!.name as string).toBe("Charlie");
+  });
+
+  it('filters records using the "ends_with" operator', async () => {
+    const results = await adapter.findMany<Record<string, unknown>>({
+      model: "user",
+      where: [{ field: "email", operator: "ends_with", value: "@example.com" }],
+      sortBy: { field: "name", direction: "asc" },
+    });
+
+    expect(results).toHaveLength(5);
+    expect(results.map((user) => user.name)).toEqual([
+      "Alice",
+      "Bob",
+      "Charlie",
+      "Diana",
+      "Eve",
+    ]);
+  });
+
+  it("handles OR connector behavior explicitly", async () => {
+    const results = await adapter.findMany<Record<string, unknown>>({
+      model: "user",
+      where: [
+        { field: "email", operator: "eq", value: "alice@example.com" },
+        {
+          field: "email",
+          operator: "eq",
+          value: "eve@example.com",
+          connector: "OR",
+        },
+      ],
+      sortBy: { field: "name", direction: "asc" },
+    });
+
+    expect(results).toHaveLength(2);
+    expect(results.map((user) => user.name)).toEqual(["Alice", "Eve"]);
+  });
+
   it("rejects unsupported operators explicitly", async () => {
     await expect(
       adapter.findMany<Record<string, unknown>>({
