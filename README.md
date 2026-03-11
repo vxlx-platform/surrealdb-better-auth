@@ -303,6 +303,33 @@ Environment variables:
 - `SURREALDB_PASSWORD`
 - `SURREALDB_NAMESPACE`
 - `SURREALDB_DATABASE`
+- `JWT_JWKS_PATH`
+- `SURREALDB_ACCESS`
+
+`SURREALDB_ACCESS` is optional. When it is set, the example server shapes Better Auth JWTs for SurrealDB record access by including:
+
+- `exp`
+- `id` as a record id such as `user:abc123`
+- `sub` as the same record id
+- `ac`
+- `ns`
+- `db`
+- `email`
+
+The value must match the SurrealDB access method name from `DEFINE ACCESS ... TYPE RECORD WITH JWT`, for example:
+
+```surql
+DEFINE ACCESS better_auth_user
+  ON DATABASE
+  TYPE RECORD
+  WITH JWT URL "http://127.0.0.1:3000/api/auth/.well-known";
+```
+
+```bash
+SURREALDB_ACCESS=better_auth_user bun run dev:server
+```
+
+If `SURREALDB_ACCESS` is not set, the example server emits a more generic Better Auth JWT payload instead of SurrealDB-specific record-access claims.
 
 ## Browser Tests
 
