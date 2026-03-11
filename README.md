@@ -1,36 +1,50 @@
 # @vxlx/surrealdb-better-auth
 
-SurrealDB adapter for [Better Auth](https://www.better-auth.com/) built for the SurrealDB JavaScript SDK v2.
+SurrealDB-first [Better Auth](https://www.better-auth.com/) adapter built for the SurrealDB JavaScript SDK v2.
 
-This adapter treats Better Auth `id` values as SurrealDB record id components (`table:id`) instead of a persisted `id` column.
+It uses SurrealDB record ids and record links internally, while keeping plain Better Auth ids at the adapter boundary.
 
 - npm: [`@vxlx/surrealdb-better-auth`](https://www.npmjs.com/package/@vxlx/surrealdb-better-auth)
 - repository: [vxlx-platform/surrealdb-better-auth](https://github.com/vxlx-platform/surrealdb-better-auth)
 
 ## Why this adapter
 
-If you're using Better Auth with the SurrealDB JavaScript SDK v2 client, this adapter gives you a native integration layer instead of forcing a SQL-style adapter shape onto SurrealDB.
+If you're using Better Auth with the SurrealDB JavaScript SDK v2 client, this adapter gives you a SurrealDB-native integration layer instead of forcing a SQL-shaped adapter model onto SurrealDB.
 
-- Built against the SurrealDB JavaScript SDK v2 API
-- Fits modern SurrealDB v3 deployments
-- Uses SurrealDB record ids as first-class identifiers
-- Preserves Better Auth's current adapter factory integration
-- Handles record links and id normalization automatically
+- SurrealDB record-id-first identity model
+- Plain Better Auth ids at the adapter boundary
+- Automatic `RecordId` handling for references
+- Better Auth adapter factory and transaction support
+- Built for the SurrealDB JavaScript SDK v2 on modern SurrealDB deployments
+
+## What Makes This Adapter Different
+
+Compared with more generic or SQL-shaped SurrealDB adapters, this adapter is opinionated about staying close to both SurrealDB and Better Auth.
+
+- Uses the SurrealDB record id as the real primary identity instead of treating `id` as just another stored column.
+- Normalizes ids back to plain Better Auth-friendly values at the adapter boundary, so consumers do not have to work with `table:id` values everywhere.
+- Converts referenced Better Auth ids into SurrealDB `RecordId` links automatically, while rejecting explicit wrong-table record ids early.
+- Uses database-side sorting, pagination, and filtering instead of falling back to JavaScript-side query shaping.
+- Rejects unsupported query operators explicitly instead of silently degrading behavior.
+- Supports Better Auth transactions through SurrealDB SDK v2 session transactions.
+- Generates SurrealDB-oriented schema with `record<...>` reference fields instead of modeling auth tables like a relational schema first.
+- Shapes common SurrealDB failures into clearer adapter-scoped errors, including unique constraint and field coercion failures.
+
+In short: this adapter is designed to let Better Auth speak in plain ids and adapter semantics, while letting SurrealDB keep its native record-id and record-link model underneath.
 
 ## Features
 
-- SurrealDB JavaScript SDK v2-first adapter for Better Auth
-- Better Auth adapter factory integration (`createAdapterFactory`)
+- SurrealDB-first Better Auth adapter built around record ids and record links
 - Full CRUD support (`create`, `findOne`, `findMany`, `count`, `update`, `updateMany`, `delete`, `deleteMany`)
 - Better Auth transaction support via `adapter.transaction(...)`
-- SurrealDB record-link support for referenced fields (`record<...>`)
+- Automatic id normalization between Better Auth ids and SurrealDB record ids
+- Explicit query/operator validation and adapter-scoped error shaping
 - Configurable record id generation strategy:
   - `native` (default)
   - `ulid`
   - `uuidv7`
   - per-table function
 - Schema generation helper for Better Auth tables (`createSchema` / `generateSurqlSchema`)
-- Output normalization so Better Auth sees plain ids instead of `table:id`
 
 ## Supported and Tested CRUD Operations
 
