@@ -7,6 +7,11 @@ export interface TestServerHandle {
   stop: () => Promise<void>;
 }
 
+export interface StartTestServerOptions {
+  port?: number;
+  env?: Record<string, string>;
+}
+
 const waitForHealth = async (baseUrl: string, timeoutMs: number) => {
   const startedAt = Date.now();
 
@@ -26,8 +31,11 @@ const waitForHealth = async (baseUrl: string, timeoutMs: number) => {
   throw new Error(`Timed out waiting for test server health check at ${baseUrl}/health`);
 };
 
-export async function startTestServer(port = 3001): Promise<TestServerHandle> {
+export async function startTestServer(options: StartTestServerOptions = {}): Promise<TestServerHandle> {
   const env = getTestDbEnv();
+  const rawWorkerId = process.env.VITEST_POOL_ID ?? process.env.VITEST_WORKER_ID;
+  const workerId = rawWorkerId ? Number(rawWorkerId) : 0;
+  const port = (options.port ?? 3001) + workerId;
   const child: ChildProcess = spawn("bun", ["run", "./examples/bun-server.ts"], {
     cwd: process.cwd(),
     env: {
@@ -38,6 +46,7 @@ export async function startTestServer(port = 3001): Promise<TestServerHandle> {
       SURREALDB_PASSWORD: env.password,
       SURREALDB_NAMESPACE: getScopedDbName(env.namespace),
       SURREALDB_DATABASE: getScopedDbName(env.database),
+      ...options.env,
     },
     stdio: ["ignore", "ignore", "pipe"],
   });

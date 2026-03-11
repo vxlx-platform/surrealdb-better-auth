@@ -9,9 +9,16 @@ const expectOkJson = async (response: Response, context: string) => {
   return response.json();
 };
 
+const getBaseUrl = () => {
+  if (typeof window !== "undefined" && window.location) {
+    return window.location.origin;
+  }
+  return "http://127.0.0.1:3002";
+};
+
 describe("Browser auth flows", () => {
   it("fetches /.well-known from a real browser context", async () => {
-    const response = await fetch("/api/auth/.well-known", {
+    const response = await fetch(`${getBaseUrl()}/api/auth/.well-known`, {
       signal: AbortSignal.timeout(5_000),
     });
 
@@ -24,7 +31,7 @@ describe("Browser auth flows", () => {
     const email = `browser-${Date.now()}@example.com`;
     const password = "browser-password-123";
 
-    const signUpResponse = await fetch("/api/auth/sign-up/email", {
+    const signUpResponse = await fetch(`${getBaseUrl()}/api/auth/sign-up/email`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -44,7 +51,7 @@ describe("Browser auth flows", () => {
     expect(signUp.user.email).toBe(email);
 
     const sessionAfterSignUp = (await expectOkJson(
-      await fetch("/api/auth/get-session", {
+      await fetch(`${getBaseUrl()}/api/auth/get-session`, {
         credentials: "include",
         signal: AbortSignal.timeout(5_000),
       }),
@@ -56,7 +63,7 @@ describe("Browser auth flows", () => {
     expect(sessionAfterSignUp?.user.email).toBe(email);
 
     await expectOkJson(
-      await fetch("/api/auth/sign-out", {
+      await fetch(`${getBaseUrl()}/api/auth/sign-out`, {
         method: "POST",
         credentials: "include",
         signal: AbortSignal.timeout(5_000),
@@ -65,7 +72,7 @@ describe("Browser auth flows", () => {
     );
 
     const sessionAfterSignOut = (await expectOkJson(
-      await fetch("/api/auth/get-session", {
+      await fetch(`${getBaseUrl()}/api/auth/get-session`, {
         credentials: "include",
         signal: AbortSignal.timeout(5_000),
       }),
@@ -76,7 +83,7 @@ describe("Browser auth flows", () => {
 
     expect(sessionAfterSignOut).toBeNull();
 
-    const signInResponse = await fetch("/api/auth/sign-in/email", {
+    const signInResponse = await fetch(`${getBaseUrl()}/api/auth/sign-in/email`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -92,7 +99,7 @@ describe("Browser auth flows", () => {
     await expectOkJson(signInResponse, "Browser sign-in");
 
     const sessionAfterSignIn = (await expectOkJson(
-      await fetch("/api/auth/get-session", {
+      await fetch(`${getBaseUrl()}/api/auth/get-session`, {
         credentials: "include",
         signal: AbortSignal.timeout(5_000),
       }),

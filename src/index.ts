@@ -64,7 +64,6 @@ export interface SurrealApiEndpointsConfig {
    * Defaults to `user`, `session`, `account`, and `jwks`.
    */
   models?: string[];
-
 }
 
 /**
@@ -818,7 +817,9 @@ export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) =
     return trimmed ? `/${trimmed}` : "";
   })();
   const apiModels = new Set(
-    resolvedApiConfig?.models?.length ? resolvedApiConfig.models : ["user", "session", "account", "jwks"],
+    resolvedApiConfig?.models?.length
+      ? resolvedApiConfig.models
+      : ["user", "session", "account", "jwks"],
   );
 
   for (const tableKey in tables) {
