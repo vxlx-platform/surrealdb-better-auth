@@ -12,7 +12,7 @@ import {
   InvalidSessionError,
   MissingNamespaceDatabaseError,
   RecordId,
-  ResponseError,
+  ServerError,
   StringRecordId,
   type Surreal,
   SurrealError,
@@ -95,7 +95,6 @@ export interface SurrealAdapterConfig {
    * Or you can provide a function to control per-table behavior.
    */
   recordIdFormat?: RecordIdFormat | ((tableName: string) => RecordIdFormat);
-
 }
 
 type InternalSurrealAdapterConfig = SurrealAdapterConfig & {
@@ -111,7 +110,10 @@ type InternalSurrealAdapterConfig = SurrealAdapterConfig & {
 type QueryTarget = Table | RecordId | RecordId[];
 
 type SurrealQueryClient = {
-  query<R extends unknown[] = unknown[]>(query: string, bindings?: Record<string, unknown>): Promise<R>;
+  query<R extends unknown[] = unknown[]>(
+    query: string,
+    bindings?: Record<string, unknown>,
+  ): Promise<R>;
   query<R extends unknown[] = unknown[]>(query: BoundQuery<R>): Promise<R>;
 };
 
@@ -299,9 +301,11 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
 
   const createCustomAdapter =
     (client: SurrealQueryClient) =>
-    ({ getModelName, getFieldName, getFieldAttributes }: Parameters<
-      Parameters<typeof createAdapterFactory>[0]["adapter"]
-    >[0]) => {
+    ({
+      getModelName,
+      getFieldName,
+      getFieldAttributes,
+    }: Parameters<Parameters<typeof createAdapterFactory>[0]["adapter"]>[0]) => {
       const modelNameCache = new Map<string, string>();
       const fieldContextCache = new Map<string, ModelFieldContext>();
 
@@ -459,8 +463,10 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           );
         }
 
-        if (error instanceof ResponseError) {
-          const fieldCoercionMatch = error.message.match(/Couldn't coerce value for field `([^`]+)`/i);
+        if (error instanceof ServerError) {
+          const fieldCoercionMatch = error.message.match(
+            /Couldn't coerce value for field `([^`]+)`/i,
+          );
           if (fieldCoercionMatch) {
             throw adapterError(
               `Invalid value for field "${fieldCoercionMatch[1]}" while ${context}.`,
@@ -620,7 +626,10 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         }
       };
 
-      const queryOne = async <T>(query: BoundQuery, context = "reading a record"): Promise<T | null> => {
+      const queryOne = async <T>(
+        query: BoundQuery,
+        context = "reading a record",
+      ): Promise<T | null> => {
         try {
           const [rows] = await executeQuery<QueryResultRows<T>>(client, query);
           return rows?.[0] ?? null;
@@ -658,7 +667,10 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           appendWhere(query, tableName, rest);
           query.append(" GROUP ALL");
 
-          const rows = await queryMany<{ count: number }>(query, `counting records in "${tableName}"`);
+          const rows = await queryMany<{ count: number }>(
+            query,
+            `counting records in "${tableName}"`,
+          );
           return rows[0]?.count ?? 0;
         },
 
@@ -864,22 +876,14 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           return (await queryScalar<number>(query, `deleting records from "${tableName}"`)) ?? 0;
         },
 
-        createSchema: async ({
-          file,
-          tables,
-        }: {
-          file?: string;
-          tables: BetterAuthDBSchema;
-        }) => {
-          return generateSurqlSchema(
-            {
-              file,
-              tables,
-              getModelName,
-              getFieldName,
-              apiEndpoints: internalConfig?.apiEndpoints,
-            } as InternalGenerateSurqlSchemaOptions,
-          );
+        createSchema: async ({ file, tables }: { file?: string; tables: BetterAuthDBSchema }) => {
+          return generateSurqlSchema({
+            file,
+            tables,
+            getModelName,
+            getFieldName,
+            apiEndpoints: internalConfig?.apiEndpoints,
+          } as InternalGenerateSurqlSchemaOptions);
         },
       };
     };
@@ -1032,13 +1036,8 @@ export const executeSurqlSchema = async (db: Surreal, code: string) => {
  * This function is decoupled from the adapter factory to allow direct testing.
  */
 export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) => {
-  const {
-    file,
-    tables,
-    getModelName,
-    getFieldName,
-    apiEndpoints,
-  } = options as InternalGenerateSurqlSchemaOptions;
+  const { file, tables, getModelName, getFieldName, apiEndpoints } =
+    options as InternalGenerateSurqlSchemaOptions;
   const code: string[] = [];
   const apiTableNames: string[] = [];
   const resolvedApiConfig =
