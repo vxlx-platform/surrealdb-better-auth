@@ -5,9 +5,12 @@ on:
     tags:
       - "v*"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: write
-  id-token: write
+  id-token: write # REQUIRED for OIDC Trusted Publishing
 
 jobs:
   publish:
@@ -26,6 +29,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          registry-url: "https://registry.npmjs.org/"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -47,7 +51,9 @@ jobs:
           fi
 
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        # No NODE_AUTH_TOKEN required with OIDC. 
+        # Provenance is automatic when using OIDC Trusted Publishing.
+        run: npm publish --access public
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

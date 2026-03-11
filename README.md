@@ -61,7 +61,7 @@ The adapter currently supports and is covered by integration tests for the follo
 
 ## Supported Query Operators
 
-The adapter currently implements the following filter operators for `where` clauses:
+The adapter currently implements the following `where` operators internally for Better Auth database queries:
 
 - ✅ **`eq`**
 - ✅ **`ne`**
@@ -84,42 +84,6 @@ Unsupported operators are rejected explicitly instead of silently falling back t
 For the `in` operator, Better Auth validates that the value is an array before the adapter runs.
 
 When you filter by related records, the adapter automatically converts plain Better Auth ids into SurrealDB `RecordId`s for you. If you pass an explicit record id, it must match the referenced table.
-
-### Query Operator Examples
-
-```ts
-const builtConfig = auth.options;
-const adapterFactory = builtConfig.database as any;
-const adapter = adapterFactory({ plugins: builtConfig.plugins });
-
-const recentVerifiedUsers = await adapter.findMany({
-  model: "user",
-  where: [
-    { field: "emailVerified", operator: "eq", value: true },
-    { field: "createdAt", operator: "gte", value: new Date("2026-01-01") },
-  ],
-  sortBy: { field: "createdAt", direction: "desc" },
-  limit: 10,
-});
-
-const accountsForProviders = await adapter.findMany({
-  model: "account",
-  where: [{ field: "providerId", operator: "in", value: ["google", "github"] }],
-});
-
-const sessionsForUser = await adapter.findMany({
-  model: "session",
-  where: [{ field: "userId", operator: "eq", value: "user_123" }],
-});
-
-const usersMatchingSearch = await adapter.findMany({
-  model: "user",
-  where: [
-    { field: "email", operator: "ends_with", value: "@example.com" },
-    { field: "name", operator: "starts_with", value: "A", connector: "OR" },
-  ],
-});
-```
 
 ## Installation
 
@@ -220,54 +184,120 @@ Malformed `where` input that Better Auth validates itself, such as a non-array v
 
 ## Transactions
 
-The adapter implements Better Auth's transaction hook using the SurrealDB JavaScript SDK v2 session transaction API. Internally it forks the active session, starts a transaction, runs the callback against that transaction-scoped session, and then commits or cancels it.
+The adapter supports Better Auth's transaction hook using the SurrealDB JavaScript SDK v2 session transaction API.
 
-Usage:
+This is mainly used by Better Auth itself for multi-step database writes that should succeed or fail atomically.
 
-```ts
-await adapter.transaction(async (trx) => {
-  const user = await trx.create({
-    model: "user",
-    data: {
-      name: "Transactional User",
-      email: "tx@example.com",
-      emailVerified: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-  });
-
-  await trx.create({
-    model: "session",
-    data: {
-      userId: user.id,
-      token: "session-token",
-      expiresAt: new Date(Date.now() + 1000 * 60 * 60),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-  });
-});
-```
-
-If the callback throws, the adapter cancels the transaction and rethrows the original error.
+If a transaction callback throws, the adapter cancels the transaction and rethrows the original error.
 
 ## Schema Generation
 
-The adapter exposes Better Auth `createSchema`, a standalone helper, and an explicit schema-apply helper.
+The adapter supports two explicit schema workflows:
 
-### Via Better Auth adapter instance
+- generate schema only
+- apply schema as a migration/setup step
+
+### Better Auth CLI generate
+
+The adapter implements Better Auth's `createSchema` hook, so it is compatible with the Better Auth CLI schema generation flow.
+
+In practice, that means the Better Auth `generate` command can ask the adapter for the SurrealDB schema output instead of requiring a separate adapter-specific generator.
+
+If your Better Auth config module loads cleanly in the CLI environment, you can use the Better Auth CLI generate flow and have it emit SurQL through this adapter's schema hook.
+
+Recommended pattern:
+
+- export a side-effect-free Better Auth config module
+- create the `Surreal` client at module scope
+- do not call `connect`, `signin`, or `use` during module import
+- connect the database in your server/bootstrap entrypoint instead
+
+Example:
 
 ```ts
-const builtConfig = auth.options;
-const adapterFactory = builtConfig.database as any;
-const adapter = adapterFactory({ plugins: builtConfig.plugins });
+// db.ts
+import { Surreal } from "surrealdb";
 
-const result = await adapter.createSchema(builtConfig, "better-auth-schema.surql");
-await db.query(result.code);
+export const db = new Surreal();
+
+let ready: Promise<void> | null = null;
+
+export function ensureDbReady() {
+  if (!ready) {
+    ready = (async () => {
+      await db.connect(process.env.SURREALDB_ENDPOINT ?? "ws://127.0.0.1:8000/rpc");
+      await db.signin({
+        username: process.env.SURREALDB_USERNAME ?? "root",
+        password: process.env.SURREALDB_PASSWORD ?? "root",
+      });
+      await db.use({
+        namespace: process.env.SURREALDB_NAMESPACE ?? "main",
+        database: process.env.SURREALDB_DATABASE ?? "main",
+      });
+    })();
+  }
+
+  return ready;
+}
 ```
 
-### Apply schema programmatically
+```ts
+// auth.ts
+import { betterAuth } from "better-auth";
+import { surrealAdapter } from "@vxlx/surrealdb-better-auth";
+import { db } from "./db";
+
+export const auth = betterAuth({
+  database: surrealAdapter(db),
+  advanced: {
+    database: {
+      generateId: false,
+    },
+  },
+  emailAndPassword: {
+    enabled: true,
+  },
+});
+```
+
+```ts
+// server.ts
+import { auth } from "./auth";
+import { ensureDbReady } from "./db";
+
+await ensureDbReady();
+
+Bun.serve({
+  port: 3000,
+  fetch(request) {
+    return auth.handler(request);
+  },
+});
+```
+
+With that shape, `bunx auth@latest generate` can import your Better Auth config and call the adapter's schema hook without requiring a live database connection during module load.
+
+### Generate only
+
+You can generate SurQL through the Better Auth CLI flow or with the standalone generator helper.
+
+```ts
+import { generateSurqlSchema } from "@vxlx/surrealdb-better-auth";
+
+const result = await generateSurqlSchema({
+  file: "better-auth-schema.ts",
+  tables,
+  getModelName,
+  getFieldName,
+});
+
+// result.path -> "better-auth-schema.surql"
+// result.code -> SurQL
+```
+
+### Apply as a migration or setup step
+
+`applySurqlSchema(...)` is intended for explicit schema application in a migration script, local setup script, or controlled bootstrap step. It is not part of normal request-time adapter usage.
 
 ```ts
 import { applySurqlSchema } from "@vxlx/surrealdb-better-auth";
@@ -279,9 +309,9 @@ await applySurqlSchema({
 });
 ```
 
-`applySurqlSchema(...)` applies the generated SurQL statement-by-statement so repeated runs remain idempotent and do not abort on earlier `DEFINE TABLE ... already exists` errors.
+Internally, `applySurqlSchema(...)` generates the schema through the adapter hook and then applies the SurQL statement-by-statement so repeated runs remain idempotent and do not abort on earlier `DEFINE TABLE ... already exists` errors.
 
-### Run as a migration script
+### Migration CLI
 
 Export both your Better Auth instance and connected Surreal client:
 
@@ -431,22 +461,6 @@ Current browser coverage focuses on:
 - session cookie reuse via `/api/auth/get-session`
 
 The browser suite starts the example Bun server automatically and proxies `/api/auth/*` through the Vitest browser server so requests stay same-origin for cookie testing.
-
-### Standalone helper
-
-```ts
-import { generateSurqlSchema } from "@vxlx/surrealdb-better-auth";
-
-const result = await generateSurqlSchema({
-  file: "better-auth-schema.ts",
-  tables,
-  getModelName,
-  getFieldName,
-});
-
-// result.path -> "better-auth-schema.surql"
-// result.code -> SurQL
-```
 
 ## Exported API
 
