@@ -7,6 +7,7 @@ import {
 import {
   BoundQuery,
   ConnectionUnavailableError,
+  DateTime,
   type Expr,
   type ExprLike,
   InvalidSessionError,
@@ -1018,6 +1019,9 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
       }) => {
         if (field === "id" || fieldAttributes?.references) {
           return stripRecordPrefix(data);
+        }
+        if (data instanceof DateTime) {
+          return data.toDate();
         }
         return data;
       },

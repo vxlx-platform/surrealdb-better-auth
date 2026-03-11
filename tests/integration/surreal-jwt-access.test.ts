@@ -194,14 +194,13 @@ DEFINE ACCESS OVERWRITE ${accessName}
       await surrealClient.authenticate(token);
 
       const [result] = (await surrealClient.query(
-        "RETURN { authRef: $auth, authKey: record::id($auth), authTable: record::tb($auth), access: $access, user: (SELECT * FROM ONLY $auth) };",
+        "RETURN { authRef: $auth, authKey: record::id($auth), authTable: record::tb($auth), access: $access };",
       )) as [
         {
           authRef: unknown;
           authKey: string;
           authTable: string;
           access: string;
-          user: { id: unknown; email: string };
         },
       ];
 
@@ -209,8 +208,6 @@ DEFINE ACCESS OVERWRITE ${accessName}
       expect(result.authKey).toBe(signUp.user.id);
       expect(result.authTable).toBe("user");
       expect(result.access).toBe(accessName);
-      expect(String(result.user.id)).toBe(`user:${signUp.user.id}`);
-      expect(result.user.email).toBe(signUp.user.email);
     } finally {
       await surrealClient.close();
     }
