@@ -266,11 +266,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
   };
 
   const extractRecordTable = (value: unknown): string | null => {
-    if (
-      value instanceof RecordId ||
-      value instanceof StringRecordId ||
-      typeof value === "string"
-    ) {
+    if (value instanceof RecordId || value instanceof StringRecordId || typeof value === "string") {
       const raw = String(value);
       const separatorIndex = raw.indexOf(":");
       if (separatorIndex > 0) {
@@ -426,23 +422,31 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
       };
 
       /**
-       * SurrealDB expects `NONE` for option-field clears (not SQL NULL).
+       * SurrealDB expects `NONE` for option-field clears.
        * The client serializer emits `NONE` for `undefined`, so we normalize
        * incoming `null` values to `undefined` before writes.
        */
       const normalizeNullToNone = (value: unknown): unknown => {
         if (value === null) return undefined;
-        if (Array.isArray(value)) return value.map((entry) => normalizeNullToNone(entry));
         if (
-          value &&
-          typeof value === "object" &&
-          Object.getPrototypeOf(value) === Object.prototype
+          value instanceof RecordId ||
+          value instanceof StringRecordId ||
+          value instanceof Uuid ||
+          value instanceof Date ||
+          value instanceof Uint8Array
         ) {
-          const normalized: Record<string, unknown> = {};
-          for (const [k, v] of Object.entries(value)) {
-            normalized[k] = normalizeNullToNone(v);
+          return value;
+        }
+        if (Array.isArray(value)) return value.map((entry) => normalizeNullToNone(entry));
+        if (value && typeof value === "object") {
+          const proto = Object.getPrototypeOf(value);
+          if (proto === null || proto === Object.prototype || proto.constructor.name === "Object") {
+            const normalized: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(value)) {
+              normalized[k] = normalizeNullToNone(v);
+            }
+            return normalized;
           }
-          return normalized;
         }
         return value;
       };
@@ -831,11 +835,11 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           }
 
           if (typeof limit === "number") {
-            query.append(` LIMIT ${limit}`);
+            query.append(surql` LIMIT ${limit}`);
           }
 
           if (typeof offset === "number") {
-            query.append(` START ${offset}`);
+            query.append(surql` START ${offset}`);
           }
 
           return queryMany<T>(query, `finding records in "${tableName}"`);
