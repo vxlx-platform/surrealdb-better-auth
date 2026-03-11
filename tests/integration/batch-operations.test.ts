@@ -130,4 +130,30 @@ describe("Adapter Batch Operations (updateMany & deleteMany)", () => {
       expect(remaining).toBe(3);
     });
   });
+
+  describe("reference fields", () => {
+    it("rejects writes when a reference field uses the wrong record table", async () => {
+      await expect(
+        adapter.create({
+          model: "session",
+          data: {
+            token: "bad_ref",
+            expiresAt: new Date(Date.now() + 60_000),
+            userId: "account:not-a-user",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        }),
+      ).rejects.toThrow(/Reference field "userId" on model "session" expects a "user" record id/);
+    });
+
+    it("rejects reference filters when the record table does not match", async () => {
+      await expect(
+        adapter.findMany<Record<string, unknown>>({
+          model: "session",
+          where: [{ field: "userId", operator: "eq", value: "account:not-a-user" }],
+        }),
+      ).rejects.toThrow(/Reference field "userId" on model "session" expects a "user" record id/);
+    });
+  });
 });

@@ -265,6 +265,69 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
     return new RecordId(tableName, toRecordIdPart(tableName, idComponent));
   };
 
+  const extractRecordTable = (value: unknown): string | null => {
+    if (
+      value instanceof RecordId ||
+      value instanceof StringRecordId ||
+      typeof value === "string"
+    ) {
+      const raw = String(value);
+      const separatorIndex = raw.indexOf(":");
+      if (separatorIndex > 0) {
+        return raw.slice(0, separatorIndex);
+      }
+    }
+    return null;
+  };
+
+  const normalizeReferenceInput = (
+    refTable: string,
+    value: unknown,
+    context: { model: string; field: string; operator?: string },
+  ): unknown => {
+    if (value === null || value === undefined) {
+      return value;
+    }
+
+    if (value instanceof RecordId) {
+      const table = extractRecordTable(value);
+      if (table && table !== refTable) {
+        throw adapterError(
+          `Reference field "${context.field}" on model "${context.model}" expects a "${refTable}" record id, ` +
+            `received "${table}".`,
+        );
+      }
+      return value;
+    }
+
+    if (value instanceof StringRecordId) {
+      const table = extractRecordTable(value);
+      if (table && table !== refTable) {
+        throw adapterError(
+          `Reference field "${context.field}" on model "${context.model}" expects a "${refTable}" record id, ` +
+            `received "${table}".`,
+        );
+      }
+      return new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(String(value))));
+    }
+
+    if (typeof value === "string" || typeof value === "number" || typeof value === "bigint") {
+      const table = extractRecordTable(value);
+      if (table && table !== refTable) {
+        throw adapterError(
+          `Reference field "${context.field}" on model "${context.model}" expects a "${refTable}" record id, ` +
+            `received "${table}".`,
+        );
+      }
+      return new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(value)));
+    }
+
+    throw adapterError(
+      `Reference field "${context.field}" on model "${context.model}" requires a record id-compatible value` +
+        `${context.operator ? ` for operator "${context.operator}"` : ""}.`,
+    );
+  };
+
   /**
    * Normalizes a SurrealDB record value into its raw id component.
    *
@@ -534,21 +597,22 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           );
         }
 
-        if (fieldAttributes?.references && typeof value === "string") {
+        if (fieldAttributes?.references && operator !== "in") {
           const refTable = fieldAttributes.references.model;
-          value = new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(value)));
+          value = normalizeReferenceInput(refTable, value, {
+            model,
+            field: where.field,
+            operator,
+          });
         } else if (fieldAttributes?.references && operator === "in" && Array.isArray(value)) {
           const refTable = fieldAttributes.references.model;
-          value = value.map((entry) => {
-            if (
-              typeof entry === "string" ||
-              typeof entry === "number" ||
-              typeof entry === "bigint"
-            ) {
-              return new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(entry)));
-            }
-            return entry;
-          });
+          value = value.map((entry) =>
+            normalizeReferenceInput(refTable, entry, {
+              model,
+              field: where.field,
+              operator,
+            }),
+          );
         }
 
         const ident = escapeIdent(fieldName);
@@ -916,15 +980,19 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
        * `RecordId` instances so they can be stored as `record<...>` links.
        */
       customTransformInput: ({
+        field,
+        model,
         fieldAttributes,
         data,
       }: {
+        field: string;
+        model: string;
         fieldAttributes: { references?: { model: string } } | undefined;
         data: unknown;
       }) => {
-        if (fieldAttributes?.references && typeof data === "string") {
+        if (fieldAttributes?.references) {
           const refTable = fieldAttributes.references.model;
-          return new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(data)));
+          return normalizeReferenceInput(refTable, data, { model, field });
         }
         return data;
       },
