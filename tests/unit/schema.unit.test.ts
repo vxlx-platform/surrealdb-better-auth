@@ -3,6 +3,10 @@ import type { BetterAuthDBSchema } from "better-auth";
 
 import { applySurqlSchema, generateSurqlSchema } from "../../src/index";
 
+type TestSchemaOptions = Parameters<typeof generateSurqlSchema>[0] & {
+  apiEndpoints?: boolean | { basePath?: string; models?: string[] };
+};
+
 describe("Adapter Schema Generation (createSchema)", () => {
   const getModelName = (name: string) => name;
   const getFieldName = (opts: { field: string }) => opts.field;
@@ -43,7 +47,7 @@ describe("Adapter Schema Generation (createSchema)", () => {
       tables: mockSchema,
       getModelName,
       getFieldName,
-    });
+    } satisfies TestSchemaOptions);
 
     expect(result).toBeDefined();
     const sql = result.code;
@@ -109,7 +113,7 @@ describe("Adapter Schema Generation (createSchema)", () => {
         tables: invalidSchema,
         getModelName,
         getFieldName,
-      }),
+      } satisfies TestSchemaOptions),
     ).rejects.toThrow(/Array type not supported/);
   });
 
@@ -129,7 +133,7 @@ describe("Adapter Schema Generation (createSchema)", () => {
         tables: invalidSchema,
         getModelName,
         getFieldName,
-      }),
+      } satisfies TestSchemaOptions),
     ).rejects.toThrow(/Unsupported field type/);
   });
 
@@ -168,7 +172,7 @@ describe("Adapter Schema Generation (createSchema)", () => {
       getModelName,
       getFieldName,
       apiEndpoints: true,
-    });
+    } as TestSchemaOptions);
 
     const sql = result.code;
 

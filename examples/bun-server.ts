@@ -29,9 +29,7 @@ await db.use({
 
 const auth = betterAuth({
   baseURL,
-  database: surrealAdapter(db, {
-    apiEndpoints: true,
-  }),
+  database: surrealAdapter(db),
   advanced: {
     database: {
       generateId: false,

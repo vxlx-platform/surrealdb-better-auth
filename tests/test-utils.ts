@@ -19,8 +19,12 @@ export async function createTestDb() {
   return { db };
 }
 
+type TestOnlyAdapterConfig = SurrealAdapterConfig & {
+  apiEndpoints?: boolean | { basePath?: string; models?: string[] };
+};
+
 export async function buildAdapter(
-  options?: SurrealAdapterConfig,
+  options?: TestOnlyAdapterConfig,
   authOptions?: Partial<BetterAuthOptions>,
 ) {
   const { db } = await createTestDb();
@@ -32,7 +36,7 @@ export async function buildAdapter(
   const auth = betterAuth({
     ...authOptions,
     plugins: hasTestUtils ? inputPlugins : [...inputPlugins, testUtils()],
-    database: surrealAdapter(db, options),
+    database: surrealAdapter(db, options as SurrealAdapterConfig | undefined),
   });
 
   const builtConfig = auth.options as BetterAuthOptions;

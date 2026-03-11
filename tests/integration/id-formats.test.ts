@@ -160,4 +160,29 @@ describe("Record ID Formats Configuration", () => {
     expect(sessions[0]!.id).toMatch(RANDOM_ID_REGEX);
     expect((sessions[0]!.id as string).length).toBeGreaterThanOrEqual(20);
   });
+
+  it("rejects unsupported record-id formats from a table-specific formatter", async () => {
+    const built = await buildAdapter(
+      {
+        recordIdFormat: () => "uuidv4" as any,
+      },
+      { emailAndPassword: { enabled: true } },
+    );
+    db = built.db;
+    await ensureSchema(db, built.adapter, built.builtConfig);
+    await truncateAuthTables(db);
+
+    await expect(
+      built.adapter.create({
+        model: "user",
+        data: {
+          name: "Invalid Format User",
+          email: "invalid.id.format@example.com",
+          emailVerified: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      }),
+    ).rejects.toThrow(/Unsupported recordIdFormat "uuidv4"/);
+  });
 });

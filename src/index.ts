@@ -38,13 +38,12 @@ import {
 export type RecordIdFormat = "native" | "ulid" | "uuidv7";
 
 /**
- * Configuration for optional SurrealDB DEFINE API generation.
+ * Internal/test-only configuration for optional SurrealDB DEFINE API generation.
  *
- * Generated endpoints are read-only collection endpoints intended to be
- * explicitly enabled when you want SurrealDB HTTP API access for Better Auth
- * tables.
+ * This is kept primarily to support repository test coverage around generated
+ * SurrealDB HTTP endpoints. It is not a recommended public adapter feature.
  */
-export interface SurrealApiEndpointsConfig {
+interface SurrealApiEndpointsConfig {
   /**
    * Base path under `/api/:ns/:db`.
    *
@@ -92,12 +91,11 @@ export interface SurrealAdapterConfig {
    */
   recordIdFormat?: RecordIdFormat | ((tableName: string) => RecordIdFormat);
 
-  /**
-   * Optionally generates SurrealDB `DEFINE API` endpoints for selected Better Auth tables
-   * as part of schema generation.
-   */
-  apiEndpoints?: boolean | SurrealApiEndpointsConfig;
 }
+
+type InternalSurrealAdapterConfig = SurrealAdapterConfig & {
+  apiEndpoints?: boolean | SurrealApiEndpointsConfig;
+};
 
 /**
  * A query target can be:
@@ -107,8 +105,30 @@ export interface SurrealAdapterConfig {
  */
 type QueryTarget = Table | RecordId | RecordId[];
 
-type QueryExecutor = {
-  query<R extends unknown[]>(query: string | BoundQuery<R>): Promise<R>;
+type SurrealQueryClient = {
+  query<R extends unknown[] = unknown[]>(query: string, bindings?: Record<string, unknown>): Promise<R>;
+  query<R extends unknown[] = unknown[]>(query: BoundQuery<R>): Promise<R>;
+};
+
+type SurrealTransactionClient = SurrealQueryClient & {
+  commit(): Promise<void>;
+  cancel(): Promise<void>;
+};
+
+type SurrealSessionClient = {
+  beginTransaction(): Promise<SurrealTransactionClient>;
+  closeSession(): Promise<void>;
+};
+
+type SurrealSessionCapableClient = SurrealQueryClient & {
+  forkSession(): Promise<SurrealSessionClient>;
+};
+
+type ModelFieldContext = {
+  dbFieldName: string;
+  fieldAttributes: ReturnType<
+    Parameters<Parameters<typeof createAdapterFactory>[0]["adapter"]>[0]["getFieldAttributes"]
+  >;
 };
 
 /**
@@ -142,32 +162,23 @@ const UUID_LITERAL_RE = /^u(['"])(.+)\1$/;
  * @returns A Better Auth adapter factory configured for SurrealDB.
  */
 export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
-  let connectionLock = Promise.resolve();
-  let runtimeAdapterFactory:
-    | ((executor: QueryExecutor) => Record<string, unknown>)
-    | null = null;
-
-  const withConnectionLock = async <T>(callback: () => Promise<T>): Promise<T> => {
-    const previous = connectionLock;
-    let release!: () => void;
-    connectionLock = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-
-    await previous;
-
-    try {
-      return await callback();
-    } finally {
-      release();
+  const internalConfig = config as InternalSurrealAdapterConfig | undefined;
+  const adapterError = (message: string, cause?: unknown) => {
+    const error = new Error(`[surrealdb-adapter] ${message}`);
+    if (cause !== undefined) {
+      (error as Error & { cause?: unknown }).cause = cause;
     }
+    return error;
   };
 
-  const runDbQuery = async <T extends unknown[]>(query: string | BoundQuery<T>): Promise<T> => {
+  const executeQuery = async <T extends unknown[]>(
+    client: SurrealQueryClient,
+    query: string | BoundQuery<T>,
+  ): Promise<T> => {
     if (typeof query === "string") {
-      return (await db.query<T>(query)) as T;
+      return (await client.query<T>(query)) as T;
     }
-    return (await db.query<T>(query)) as T;
+    return (await client.query<T>(query)) as T;
   };
 
   /**
@@ -178,8 +189,14 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
    */
   const resolveIdFormat = (tableName: string): RecordIdFormat => {
     const fmt = config?.recordIdFormat;
-    if (typeof fmt === "function") return fmt(tableName);
-    return fmt ?? "native";
+    const resolved = typeof fmt === "function" ? fmt(tableName) : (fmt ?? "native");
+    if (resolved === "native" || resolved === "ulid" || resolved === "uuidv7") {
+      return resolved;
+    }
+    throw adapterError(
+      `Unsupported recordIdFormat "${String(resolved)}" for table "${tableName}". ` +
+        'Use "native", "ulid", or "uuidv7".',
+    );
   };
 
   /**
@@ -275,55 +292,51 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
     return value;
   };
 
-  const baseFactory = createAdapterFactory({
-    config: {
-      adapterId: "surrealdb-adapter",
-      adapterName: "SurrealDB Adapter",
-      usePlural: config?.usePlural ?? false,
-      debugLogs: config?.debugLogs ?? false,
-      supportsJSON: true,
-      supportsDates: true,
-      supportsBooleans: true,
-      supportsNumericIds: false,
+  const createCustomAdapter =
+    (client: SurrealQueryClient) =>
+    ({ getModelName, getFieldName, getFieldAttributes }: Parameters<
+      Parameters<typeof createAdapterFactory>[0]["adapter"]
+    >[0]) => {
+      const modelNameCache = new Map<string, string>();
+      const fieldContextCache = new Map<string, ModelFieldContext>();
 
-      /**
-       * Better Auth should not generate ids itself.
-       * SurrealDB record ids act as the record-address.
-       *
-       * NOTE: If Better Auth provides an `id`, we still honor it as the record key component.
-       */
-      disableIdGeneration: true,
+      const resolveModelName = (model: string) => {
+        const cached = modelNameCache.get(model);
+        if (cached) return cached;
 
-      /**
-       * Transforms incoming Better Auth values before they are written to SurrealDB.
-       *
-       * Reference fields are converted from Better Auth string ids into SurrealDB
-       * `RecordId` instances so they can be stored as `record<...>` links.
-       */
-      customTransformInput: ({ fieldAttributes, data }) => {
-        if (fieldAttributes?.references && typeof data === "string") {
-          const refTable = fieldAttributes.references.model;
-          return new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(data)));
+        const tableName = getModelName(model);
+        modelNameCache.set(model, tableName);
+        return tableName;
+      };
+
+      const resolveFieldContext = (model: string, field: string): ModelFieldContext => {
+        const key = `${model}:${field}`;
+        const cached = fieldContextCache.get(key);
+        if (cached) return cached;
+
+        try {
+          const resolved = {
+            dbFieldName: getFieldName({ field, model }),
+            fieldAttributes: getFieldAttributes({ field, model }),
+          };
+          fieldContextCache.set(key, resolved);
+          return resolved;
+        } catch (error) {
+          throw adapterError(
+            `Field "${field}" is not defined for model "${model}". ` +
+              "Check your Better Auth schema and adapter usage.",
+            error,
+          );
         }
-        return data;
-      },
+      };
 
-      /**
-       * Transforms outgoing SurrealDB values into Better Auth friendly values.
-       *
-       * Primary ids and reference fields are normalized from SurrealDB record ids
-       * back into plain Better Auth id strings.
-       */
-      customTransformOutput: ({ field, data, fieldAttributes }) => {
-        if (field === "id" || fieldAttributes?.references) {
-          return stripRecordPrefix(data);
+      const assertWritePayload = (model: string, input: Record<string, unknown>) => {
+        for (const key of Object.keys(input)) {
+          if (key === "id") continue;
+          resolveFieldContext(model, key);
         }
-        return data;
-      },
+      };
 
-    },
-
-    adapter: ({ getModelName, getFieldName, getFieldAttributes }) => {
       /**
        * Normalizes a Better Auth connector into a supported SQL boolean operator.
        */
@@ -362,19 +375,8 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         return value;
       };
 
-      /**
-       * Runtime type guard for distinguishing a table target from explicit record targets.
-       */
       const isTableTarget = (target: QueryTarget): target is Table => target instanceof Table;
 
-      /**
-       * Splits `where` conditions into:
-       * - a direct SurrealDB target (table, one record id, or many record ids)
-       * - remaining conditions that must still be applied in a `WHERE` clause
-       *
-       * For mixed `OR` expressions, this conservatively falls back to scanning the table
-       * and leaves all conditions in `rest` for correctness.
-       */
       const splitIdWhere = (
         model: string,
         where?: Where[],
@@ -407,7 +409,6 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
               continue;
             }
 
-            // Keep invalid/empty IN conditions in WHERE so they don't broaden scope.
             rest.push(w);
             continue;
           }
@@ -426,22 +427,11 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         return { target: ids, rest };
       };
 
-      /**
-       * Creates a lightweight custom SurrealDB expression object for operators
-       * not covered by the built-in expression helpers.
-       */
       const customExpr = (sqlFactory: (ctx: { def: (value: unknown) => string }) => string): Expr =>
         ({ toSQL: sqlFactory }) as Expr;
 
-      /**
-       * Converts a single Better Auth `Where` condition into a SurrealDB expression.
-       *
-       * Reference values are converted into `RecordId` objects when needed so that
-       * comparisons work against `record<...>` fields.
-       */
       const buildCondition = (model: string, where: Where): ExprLike => {
-        const fieldName = getFieldName({ field: where.field, model });
-        const fieldAttributes = getFieldAttributes({ field: where.field, model });
+        const { dbFieldName: fieldName, fieldAttributes } = resolveFieldContext(model, where.field);
 
         const operator = where.operator ?? "eq";
         let value: unknown = where.value;
@@ -491,11 +481,6 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         }
       };
 
-      /**
-       * Builds a full SurrealDB boolean expression from a Better Auth `Where[]` array.
-       *
-       * Conditions are combined left-to-right using Better Auth connector semantics.
-       */
       const buildWhereExpr = (model: string, where?: Where[]): ExprLike | null => {
         if (!where?.length) return null;
 
@@ -512,9 +497,6 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         return clause;
       };
 
-      /**
-       * Appends a compiled `WHERE` clause to a query if conditions are present.
-       */
       const appendWhere = (query: BoundQuery, model: string, where?: Where[]) => {
         const clause = buildWhereExpr(model, where);
         if (clause) {
@@ -523,12 +505,6 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         }
       };
 
-      /**
-       * Creates a query targeting either:
-       * - a full table
-       * - one explicit record id
-       * - many explicit record ids
-       */
       const makeTargetQuery = (
         sqlForTable: (tableName: string) => string,
         sqlForTarget: string,
@@ -541,316 +517,359 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         return new BoundQuery(sqlForTarget, { target });
       };
 
-      const createRuntimeAdapter = (executor: QueryExecutor) => {
-        /**
-         * Executes a query expected to return many rows.
-         */
-        const queryMany = async <T>(query: BoundQuery): Promise<T[]> => {
-          const [rows] = await executor.query<QueryResultRows<T>>(query);
-          return rows ?? [];
-        };
+      const queryMany = async <T>(query: BoundQuery): Promise<T[]> => {
+        const [rows] = await executeQuery<QueryResultRows<T>>(client, query);
+        return rows ?? [];
+      };
 
-        /**
-         * Executes a query expected to return zero or one row.
-         */
-        const queryOne = async <T>(query: BoundQuery): Promise<T | null> => {
-          const [rows] = await executor.query<QueryResultRows<T>>(query);
-          return rows?.[0] ?? null;
-        };
+      const queryOne = async <T>(query: BoundQuery): Promise<T | null> => {
+        const [rows] = await executeQuery<QueryResultRows<T>>(client, query);
+        return rows?.[0] ?? null;
+      };
 
-        /**
-         * Executes a query expected to return a single scalar value.
-         */
-        const queryScalar = async <T>(query: BoundQuery): Promise<T | null> => {
-          const [value] = await executor.query<[T]>(query);
-          return value ?? null;
-        };
+      const queryScalar = async <T>(query: BoundQuery): Promise<T | null> => {
+        const [value] = await executeQuery<[T]>(client, query);
+        return value ?? null;
+      };
 
-        return {
-          options: config,
+      return {
+        options: config,
 
-          count: async ({ model, where }: { model: string; where?: Where[] }): Promise<number> => {
-            const tableName = getModelName(model);
-            const { target, rest } = splitIdWhere(tableName, where);
+        count: async ({ model, where }: { model: string; where?: Where[] }): Promise<number> => {
+          const tableName = resolveModelName(model);
+          const { target, rest } = splitIdWhere(tableName, where);
 
-            const query = makeTargetQuery(
-              (tb) => `SELECT count() AS count FROM ${escapeIdent(tb)}`,
-              "SELECT count() AS count FROM $target",
-              tableName,
-              target,
-            );
+          const query = makeTargetQuery(
+            (tb) => `SELECT count() AS count FROM ${escapeIdent(tb)}`,
+            "SELECT count() AS count FROM $target",
+            tableName,
+            target,
+          );
 
-            appendWhere(query, tableName, rest);
-            query.append(" GROUP ALL");
+          appendWhere(query, tableName, rest);
+          query.append(" GROUP ALL");
 
-            const rows = await queryMany<{ count: number }>(query);
-            return rows[0]?.count ?? 0;
-          },
+          const rows = await queryMany<{ count: number }>(query);
+          return rows[0]?.count ?? 0;
+        },
 
-          create: async <T>({ model, data }: { model: string; data: T }): Promise<T> => {
-            const tableName = getModelName(model);
-            const payload = data as Record<string, unknown>;
-            const content = normalizeNullToNone(stripIdFromPayload(payload));
+        create: async <T>({ model, data }: { model: string; data: T }): Promise<T> => {
+          const tableName = resolveModelName(model);
+          const payload = data as Record<string, unknown>;
+          assertWritePayload(model, payload);
+          const content = normalizeNullToNone(stripIdFromPayload(payload));
 
-            const rawId = payload.id;
+          const rawId = payload.id;
 
-            let query: BoundQuery;
+          let query: BoundQuery;
 
-            if (rawId != null) {
-              const rid = toRecordId(tableName, rawId);
-              query = new BoundQuery(`CREATE $rid CONTENT $data`, { rid, data: content });
+          if (rawId != null) {
+            const rid = toRecordId(tableName, rawId);
+            query = new BoundQuery(`CREATE $rid CONTENT $data`, { rid, data: content });
+          } else {
+            const fmt = resolveIdFormat(tableName);
+
+            if (fmt === "ulid") {
+              query = new BoundQuery(`CREATE ${escapeIdent(tableName)}:ulid() CONTENT $data`, {
+                data: content,
+              });
+            } else if (fmt === "uuidv7") {
+              query = new BoundQuery(`CREATE ${escapeIdent(tableName)}:uuid() CONTENT $data`, {
+                data: content,
+              });
             } else {
-              const fmt = resolveIdFormat(tableName);
-
-              if (fmt === "ulid") {
-                query = new BoundQuery(`CREATE ${escapeIdent(tableName)}:ulid() CONTENT $data`, {
-                  data: content,
-                });
-              } else if (fmt === "uuidv7") {
-                query = new BoundQuery(`CREATE ${escapeIdent(tableName)}:uuid() CONTENT $data`, {
-                  data: content,
-                });
-              } else {
-                query = new BoundQuery(`CREATE ${escapeIdent(tableName)} CONTENT $data`, {
-                  data: content,
-                });
-              }
+              query = new BoundQuery(`CREATE ${escapeIdent(tableName)} CONTENT $data`, {
+                data: content,
+              });
             }
+          }
 
-            const created = await queryOne<T>(query);
-            if (!created) throw new Error(`Failed to create record in ${tableName}`);
-            return created;
-          },
+          const created = await queryOne<T>(query);
+          if (!created) {
+            throw adapterError(`Failed to create record in "${tableName}".`);
+          }
+          return created;
+        },
 
-          findOne: async <T>({
-            model,
-            where,
-          }: {
-            model: string;
-            where: Where[];
-          }): Promise<T | null> => {
-            const tableName = getModelName(model);
-            const { target, rest } = splitIdWhere(tableName, where);
+        findOne: async <T>({
+          model,
+          where,
+        }: {
+          model: string;
+          where: Where[];
+        }): Promise<T | null> => {
+          const tableName = resolveModelName(model);
+          const { target, rest } = splitIdWhere(tableName, where);
 
-            const query = makeTargetQuery(
-              (tb) => `SELECT * FROM ${escapeIdent(tb)}`,
-              "SELECT * FROM $target",
-              tableName,
-              target,
-            );
+          const query = makeTargetQuery(
+            (tb) => `SELECT * FROM ${escapeIdent(tb)}`,
+            "SELECT * FROM $target",
+            tableName,
+            target,
+          );
 
-            appendWhere(query, tableName, rest);
-            query.append(" LIMIT 1");
+          appendWhere(query, tableName, rest);
+          query.append(" LIMIT 1");
 
-            return queryOne<T>(query);
-          },
+          return queryOne<T>(query);
+        },
 
-          findMany: async <T>({
-            model,
-            where,
-            limit,
-            offset,
-            sortBy,
-          }: {
-            model: string;
-            where?: Where[];
-            limit?: number;
-            offset?: number;
-            sortBy?: { field: string; direction: "asc" | "desc" };
-          }): Promise<T[]> => {
-            const tableName = getModelName(model);
-            const { target, rest } = splitIdWhere(tableName, where);
+        findMany: async <T>({
+          model,
+          where,
+          limit,
+          offset,
+          sortBy,
+        }: {
+          model: string;
+          where?: Where[];
+          limit?: number;
+          offset?: number;
+          sortBy?: { field: string; direction: "asc" | "desc" };
+        }): Promise<T[]> => {
+          const tableName = resolveModelName(model);
+          const { target, rest } = splitIdWhere(tableName, where);
 
-            const query = makeTargetQuery(
-              (tb) => `SELECT * FROM ${escapeIdent(tb)}`,
-              "SELECT * FROM $target",
-              tableName,
-              target,
-            );
+          const query = makeTargetQuery(
+            (tb) => `SELECT * FROM ${escapeIdent(tb)}`,
+            "SELECT * FROM $target",
+            tableName,
+            target,
+          );
 
-            appendWhere(query, tableName, rest);
+          appendWhere(query, tableName, rest);
 
-            if (sortBy) {
-              const sortField = escapeIdent(getFieldName({ field: sortBy.field, model }));
-              const sortDirection = sortBy.direction === "desc" ? "DESC" : "ASC";
-              query.append(` ORDER BY ${sortField} ${sortDirection}`);
-            }
+          if (sortBy) {
+            const sortField = escapeIdent(resolveFieldContext(model, sortBy.field).dbFieldName);
+            const sortDirection = sortBy.direction === "desc" ? "DESC" : "ASC";
+            query.append(` ORDER BY ${sortField} ${sortDirection}`);
+          }
 
-            if (typeof limit === "number") {
-              query.append(` LIMIT ${limit}`);
-            }
+          if (typeof limit === "number") {
+            query.append(` LIMIT ${limit}`);
+          }
 
-            if (typeof offset === "number") {
-              query.append(` START ${offset}`);
-            }
+          if (typeof offset === "number") {
+            query.append(` START ${offset}`);
+          }
 
-            return queryMany<T>(query);
-          },
+          return queryMany<T>(query);
+        },
 
-          update: async <T>({
-            model,
-            where,
-            update,
-          }: {
-            model: string;
-            where: Where[];
-            update: T;
-          }): Promise<T | null> => {
-            const tableName = getModelName(model);
-            const { target, rest = [] } = splitIdWhere(tableName, where);
-            const patch = normalizeNullToNone(
-              stripIdFromPayload(update as Record<string, unknown>),
-            );
+        update: async <T>({
+          model,
+          where,
+          update,
+        }: {
+          model: string;
+          where: Where[];
+          update: T;
+        }): Promise<T | null> => {
+          const tableName = resolveModelName(model);
+          const { target, rest = [] } = splitIdWhere(tableName, where);
+          const payload = update as Record<string, unknown>;
+          assertWritePayload(model, payload);
+          const patch = normalizeNullToNone(stripIdFromPayload(payload));
 
-            const query = makeTargetQuery(
-              (tb) => `UPDATE ${escapeIdent(tb)}`,
-              "UPDATE $target",
-              tableName,
-              target,
-            );
+          const query = makeTargetQuery(
+            (tb) => `UPDATE ${escapeIdent(tb)}`,
+            "UPDATE $target",
+            tableName,
+            target,
+          );
 
-            query.append(surql` MERGE ${patch}`);
-            appendWhere(query, tableName, rest);
-            query.append(" RETURN AFTER");
+          query.append(surql` MERGE ${patch}`);
+          appendWhere(query, tableName, rest);
+          query.append(" RETURN AFTER");
 
-            return queryOne<T>(query);
-          },
+          return queryOne<T>(query);
+        },
 
-          updateMany: async ({
-            model,
-            update,
-            where,
-          }: {
-            model: string;
-            update: Record<string, unknown>;
-            where: Where[];
-          }): Promise<number> => {
-            const tableName = getModelName(model);
-            const { target, rest } = splitIdWhere(tableName, where);
-            const patch = normalizeNullToNone(stripIdFromPayload(update));
+        updateMany: async ({
+          model,
+          update,
+          where,
+        }: {
+          model: string;
+          update: Record<string, unknown>;
+          where: Where[];
+        }): Promise<number> => {
+          const tableName = resolveModelName(model);
+          const { target, rest } = splitIdWhere(tableName, where);
+          assertWritePayload(model, update);
+          const patch = normalizeNullToNone(stripIdFromPayload(update));
 
-            const query = makeTargetQuery(
-              (tb) => `RETURN array::len((UPDATE ${escapeIdent(tb)}`,
-              "RETURN array::len((UPDATE $target",
-              tableName,
-              target,
-            );
+          const query = makeTargetQuery(
+            (tb) => `RETURN array::len((UPDATE ${escapeIdent(tb)}`,
+            "RETURN array::len((UPDATE $target",
+            tableName,
+            target,
+          );
 
-            query.append(surql` MERGE ${patch}`);
-            appendWhere(query, tableName, rest);
-            query.append(" RETURN VALUE id))");
+          query.append(surql` MERGE ${patch}`);
+          appendWhere(query, tableName, rest);
+          query.append(" RETURN VALUE id))");
 
-            return (await queryScalar<number>(query)) ?? 0;
-          },
+          return (await queryScalar<number>(query)) ?? 0;
+        },
 
-          delete: async ({ model, where }: { model: string; where: Where[] }): Promise<void> => {
-            const tableName = getModelName(model);
-            const { target, rest } = splitIdWhere(tableName, where);
+        delete: async ({ model, where }: { model: string; where: Where[] }): Promise<void> => {
+          const tableName = resolveModelName(model);
+          const { target, rest } = splitIdWhere(tableName, where);
 
-            const query = makeTargetQuery(
-              (tb) => `DELETE ${escapeIdent(tb)}`,
-              "DELETE $target",
-              tableName,
-              target,
-            );
+          const query = makeTargetQuery(
+            (tb) => `DELETE ${escapeIdent(tb)}`,
+            "DELETE $target",
+            tableName,
+            target,
+          );
 
-            appendWhere(query, tableName, rest);
-            await executor.query(query);
-          },
+          appendWhere(query, tableName, rest);
+          await executeQuery(client, query);
+        },
 
-          deleteMany: async ({
-            model,
-            where,
-          }: {
-            model: string;
-            where: Where[];
-          }): Promise<number> => {
-            const tableName = getModelName(model);
-            const { target, rest } = splitIdWhere(tableName, where);
+        deleteMany: async ({
+          model,
+          where,
+        }: {
+          model: string;
+          where: Where[];
+        }): Promise<number> => {
+          const tableName = resolveModelName(model);
+          const { target, rest } = splitIdWhere(tableName, where);
 
-            const query = makeTargetQuery(
-              (tb) => `RETURN array::len((DELETE ${escapeIdent(tb)}`,
-              "RETURN array::len((DELETE $target",
-              tableName,
-              target,
-            );
+          const query = makeTargetQuery(
+            (tb) => `RETURN array::len((DELETE ${escapeIdent(tb)}`,
+            "RETURN array::len((DELETE $target",
+            tableName,
+            target,
+          );
 
-            appendWhere(query, tableName, rest);
-            query.append(" RETURN VALUE id))");
+          appendWhere(query, tableName, rest);
+          query.append(" RETURN VALUE id))");
 
-            return (await queryScalar<number>(query)) ?? 0;
-          },
+          return (await queryScalar<number>(query)) ?? 0;
+        },
 
-          createSchema: async ({
-            file,
-            tables,
-          }: {
-            file?: string;
-            tables: BetterAuthDBSchema;
-          }) => {
-            return generateSurqlSchema({
+        createSchema: async ({
+          file,
+          tables,
+        }: {
+          file?: string;
+          tables: BetterAuthDBSchema;
+        }) => {
+          return generateSurqlSchema(
+            {
               file,
               tables,
               getModelName,
               getFieldName,
-              apiEndpoints: config?.apiEndpoints,
-            });
-          },
-        };
+              apiEndpoints: internalConfig?.apiEndpoints,
+            } as InternalGenerateSurqlSchemaOptions,
+          );
+        },
       };
-
-      runtimeAdapterFactory = createRuntimeAdapter;
-
-      const baseExecutor: QueryExecutor = {
-        query: async <T extends unknown[]>(query: string | BoundQuery<T>) =>
-          withConnectionLock(() => runDbQuery<T>(query)),
-      };
-
-      return createRuntimeAdapter(baseExecutor);
-    },
-  });
-
-  return (options: BetterAuthOptions) => {
-    const adapter = baseFactory(options);
-    const createRuntimeAdapter = runtimeAdapterFactory;
-
-    if (!createRuntimeAdapter) {
-      throw new Error("Failed to initialize the SurrealDB runtime adapter.");
-    }
-
-    adapter.transaction = async <R>(callback: (trx: typeof adapter) => Promise<R>) => {
-      const session = await db.forkSession();
-
-      try {
-        const transaction = await session.beginTransaction();
-        const transactionExecutor: QueryExecutor = {
-          query: async <T extends unknown[]>(query: string | BoundQuery<T>) => {
-            if (typeof query === "string") {
-              return (await transaction.query<T>(query)) as T;
-            }
-            return (await transaction.query<T>(query)) as T;
-          },
-        };
-
-        try {
-          const transactionAdapter = createRuntimeAdapter(transactionExecutor) as typeof adapter;
-          const result = await callback(transactionAdapter);
-          await transaction.commit();
-          return result;
-        } catch (error) {
-          try {
-            await transaction.cancel();
-          } catch {
-            // Preserve the original error when rollback also fails.
-          }
-          throw error;
-        }
-      } finally {
-        await session.closeSession();
-      }
     };
 
-    return adapter;
+  let lazyOptions: BetterAuthOptions | null = null;
+
+  const adapterFactoryOptions = {
+    config: {
+      adapterId: "surrealdb-adapter",
+      adapterName: "SurrealDB Adapter",
+      usePlural: config?.usePlural ?? false,
+      debugLogs: config?.debugLogs ?? false,
+      supportsJSON: true,
+      supportsDates: true,
+      supportsBooleans: true,
+      supportsNumericIds: false,
+
+      /**
+       * Better Auth should not generate ids itself.
+       * SurrealDB record ids act as the record-address.
+       *
+       * NOTE: If Better Auth provides an `id`, we still honor it as the record key component.
+       */
+      disableIdGeneration: true,
+
+      /**
+       * Transforms incoming Better Auth values before they are written to SurrealDB.
+       *
+       * Reference fields are converted from Better Auth string ids into SurrealDB
+       * `RecordId` instances so they can be stored as `record<...>` links.
+       */
+      customTransformInput: ({
+        fieldAttributes,
+        data,
+      }: {
+        fieldAttributes: { references?: { model: string } } | undefined;
+        data: unknown;
+      }) => {
+        if (fieldAttributes?.references && typeof data === "string") {
+          const refTable = fieldAttributes.references.model;
+          return new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(data)));
+        }
+        return data;
+      },
+
+      /**
+       * Transforms outgoing SurrealDB values into Better Auth friendly values.
+       *
+       * Primary ids and reference fields are normalized from SurrealDB record ids
+       * back into plain Better Auth id strings.
+       */
+      customTransformOutput: ({
+        field,
+        data,
+        fieldAttributes,
+      }: {
+        field: string;
+        data: unknown;
+        fieldAttributes: { references?: { model: string } } | undefined;
+      }) => {
+        if (field === "id" || fieldAttributes?.references) {
+          return stripRecordPrefix(data);
+        }
+        return data;
+      },
+      transaction:
+        "forkSession" in db && typeof (db as SurrealSessionCapableClient).forkSession === "function"
+          ? async <R>(callback: (trx: any) => Promise<R>) => {
+              const session = await (db as SurrealSessionCapableClient).forkSession();
+
+              try {
+                const transaction = await session.beginTransaction();
+                const adapter = createAdapterFactory({
+                  config: adapterFactoryOptions.config,
+                  adapter: createCustomAdapter(transaction),
+                } as unknown as Parameters<typeof createAdapterFactory>[0])(lazyOptions!);
+
+                try {
+                  const result = await callback(adapter);
+                  await transaction.commit();
+                  return result;
+                } catch (error) {
+                  try {
+                    await transaction.cancel();
+                  } catch {
+                    // Preserve the original error when rollback also fails.
+                  }
+                  throw error;
+                }
+              } finally {
+                await session.closeSession();
+              }
+            }
+          : false,
+    },
+    adapter: createCustomAdapter(db),
+  } as unknown as Parameters<typeof createAdapterFactory>[0];
+
+  const baseFactory = createAdapterFactory(adapterFactoryOptions);
+
+  return (options: BetterAuthOptions) => {
+    lazyOptions = options;
+    return baseFactory(options);
   };
 };
 
@@ -862,8 +881,11 @@ export interface GenerateSurqlSchemaOptions {
   tables?: BetterAuthDBSchema;
   getModelName: (modelName: string) => string;
   getFieldName: (options: { field: string; model: string }) => string;
-  apiEndpoints?: boolean | SurrealApiEndpointsConfig;
 }
+
+type InternalGenerateSurqlSchemaOptions = GenerateSurqlSchemaOptions & {
+  apiEndpoints?: boolean | SurrealApiEndpointsConfig;
+};
 
 export interface ApplySurqlSchemaOptions {
   db: Surreal;
@@ -897,7 +919,13 @@ export const executeSurqlSchema = async (db: Surreal, code: string) => {
  * This function is decoupled from the adapter factory to allow direct testing.
  */
 export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) => {
-  const { file, tables, getModelName, getFieldName, apiEndpoints } = options;
+  const {
+    file,
+    tables,
+    getModelName,
+    getFieldName,
+    apiEndpoints,
+  } = options as InternalGenerateSurqlSchemaOptions;
   const code: string[] = [];
   const apiTableNames: string[] = [];
   const resolvedApiConfig =

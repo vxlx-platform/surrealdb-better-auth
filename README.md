@@ -152,7 +152,6 @@ const config: SurrealAdapterConfig = {
   usePlural: false,
   debugLogs: false,
   recordIdFormat: "native", // "native" | "ulid" | "uuidv7" | (tableName) => ...
-  apiEndpoints: false,
 };
 
 const adapter = surrealAdapter(db, config);
@@ -220,42 +219,6 @@ await adapter.transaction(async (trx) => {
 
 If the callback throws, the adapter cancels the transaction and rethrows the original error.
 
-## Optional DEFINE API Endpoints
-
-You can optionally include read-only `DEFINE API` endpoints for the Better Auth `user`, `session`, `account`, and `jwks` tables that exist in your schema.
-
-```ts
-surrealAdapter(db, {
-  apiEndpoints: {},
-});
-```
-
-By default, this adds top-level collection endpoints such as:
-
-- `/api/:ns/:db/user`
-- `/api/:ns/:db/session`
-- `/api/:ns/:db/account`
-- `/api/:ns/:db/jwks` when the JWT plugin adds the `jwks` table
-
-If you prefer a prefix, set `basePath`:
-
-```ts
-surrealAdapter(db, {
-  apiEndpoints: {
-    basePath: "/better-auth",
-  },
-});
-```
-
-That generates:
-
-- `/api/:ns/:db/better-auth/user`
-- `/api/:ns/:db/better-auth/session`
-- `/api/:ns/:db/better-auth/account`
-- `/api/:ns/:db/better-auth/jwks`
-
-Generated endpoints are currently emitted without a `PERMISSIONS` clause for compatibility with the tested SurrealDB runtime.
-
 ## Schema Generation
 
 The adapter exposes Better Auth `createSchema`, a standalone helper, and an explicit schema-apply helper.
@@ -283,7 +246,7 @@ await applySurqlSchema({
 });
 ```
 
-`applySurqlSchema(...)` applies the generated SurQL statement-by-statement so repeated runs can update `DEFINE API OVERWRITE` endpoints without aborting on earlier `DEFINE TABLE ... already exists` errors.
+`applySurqlSchema(...)` applies the generated SurQL statement-by-statement so repeated runs remain idempotent and do not abort on earlier `DEFINE TABLE ... already exists` errors.
 
 ### Run as a migration script
 
@@ -316,7 +279,7 @@ The CLI looks for `auth` and `db` exports by default. If your exports use differ
 
 ### Quick Bun server for local testing
 
-This repo also includes a minimal Bun server you can use to verify the live Better Auth routes and the generated SurrealDB `DEFINE API` endpoints against a local database:
+This repo also includes a minimal Bun server you can use to verify the live Better Auth routes against a local database:
 
 ```bash
 bun run dev:server
@@ -446,7 +409,6 @@ const result = await generateSurqlSchema({
   tables,
   getModelName,
   getFieldName,
-  apiEndpoints: {},
 });
 
 // result.path -> "better-auth-schema.surql"
@@ -459,7 +421,6 @@ const result = await generateSurqlSchema({
 - `generateSurqlSchema(options)`
 - Types:
   - `SurrealAdapterConfig`
-  - `SurrealApiEndpointsConfig`
   - `RecordIdFormat`
   - `GenerateSurqlSchemaOptions`
 
@@ -480,4 +441,5 @@ Test DB scope can be configured with:
 
 ## TODO
 
+- Decide whether internal `DEFINE API` test support should remain in the public package surface at all.
 - Expand transaction coverage to mixed Better Auth plugin flows that perform multiple model writes in one callback.

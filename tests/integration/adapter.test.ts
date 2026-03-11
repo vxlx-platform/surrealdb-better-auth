@@ -55,6 +55,18 @@ describe("surrealdb-adapter CRUD", () => {
     ).rejects.toThrow();
   });
 
+  it("rejects queries that reference an unknown field", async () => {
+    await expect(
+      adapter.findMany({
+        model: "user",
+        sortBy: {
+          field: "notARealField",
+          direction: "asc",
+        },
+      }),
+    ).rejects.toThrow(/Field "notARealField" is not defined for model "user"/);
+  });
+
   it("finds a record by logical id", async () => {
     const user = await adapter.create<UserRow>({
       model: "user",
