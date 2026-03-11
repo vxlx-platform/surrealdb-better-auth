@@ -6,11 +6,16 @@ import {
 } from "better-auth/adapters";
 import {
   BoundQuery,
+  ConnectionUnavailableError,
   type Expr,
   type ExprLike,
+  InvalidSessionError,
+  MissingNamespaceDatabaseError,
   RecordId,
+  ResponseError,
   StringRecordId,
   type Surreal,
+  SurrealError,
   Table,
   Uuid,
   and,
@@ -430,11 +435,98 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
       const customExpr = (sqlFactory: (ctx: { def: (value: unknown) => string }) => string): Expr =>
         ({ toSQL: sqlFactory }) as Expr;
 
+      const wrapQueryError = (error: unknown, context: string): never => {
+        const message = error instanceof Error ? error.message : String(error);
+
+        if (error instanceof ConnectionUnavailableError) {
+          throw adapterError(
+            `SurrealDB connection is unavailable while ${context}. Ensure the client is connected.`,
+            error,
+          );
+        }
+
+        if (error instanceof MissingNamespaceDatabaseError) {
+          throw adapterError(
+            `SurrealDB namespace/database is not selected while ${context}. Call db.use(...) first.`,
+            error,
+          );
+        }
+
+        if (error instanceof InvalidSessionError) {
+          throw adapterError(
+            `SurrealDB session is invalid while ${context}. The active transaction/session may have been closed.`,
+            error,
+          );
+        }
+
+        if (error instanceof ResponseError) {
+          const fieldCoercionMatch = error.message.match(/Couldn't coerce value for field `([^`]+)`/i);
+          if (fieldCoercionMatch) {
+            throw adapterError(
+              `Invalid value for field "${fieldCoercionMatch[1]}" while ${context}.`,
+              error,
+            );
+          }
+
+          if (
+            error.kind === "AlreadyExists" ||
+            /unique/i.test(error.message) ||
+            /duplicate/i.test(error.message)
+          ) {
+            throw adapterError(`Unique constraint violation while ${context}.`, error);
+          }
+        }
+
+        if (error instanceof SurrealError) {
+          throw adapterError(`SurrealDB error while ${context}: ${error.message}`, error);
+        }
+
+        const fieldCoercionMatch = message.match(/Couldn't coerce value for field `([^`]+)`/i);
+
+        if (fieldCoercionMatch) {
+          throw adapterError(
+            `Invalid value for field "${fieldCoercionMatch[1]}" while ${context}.`,
+            error,
+          );
+        }
+
+        if (/unique/i.test(message) || /duplicate/i.test(message)) {
+          throw adapterError(`Unique constraint violation while ${context}.`, error);
+        }
+
+        throw adapterError(`SurrealDB query failed while ${context}: ${message}`, error);
+      };
+
+      const isSupportedOperator = (operator: string) =>
+        [
+          "eq",
+          "ne",
+          "lt",
+          "lte",
+          "gt",
+          "gte",
+          "contains",
+          "in",
+          "starts_with",
+          "ends_with",
+        ].includes(operator);
+
       const buildCondition = (model: string, where: Where): ExprLike => {
         const { dbFieldName: fieldName, fieldAttributes } = resolveFieldContext(model, where.field);
-
-        const operator = where.operator ?? "eq";
+        const operator = (where.operator ?? "eq").toLowerCase();
         let value: unknown = where.value;
+
+        if (!isSupportedOperator(operator)) {
+          throw adapterError(
+            `Unsupported operator "${operator}" for field "${where.field}" on model "${model}".`,
+          );
+        }
+
+        if (operator === "in" && !Array.isArray(value)) {
+          throw adapterError(
+            `Operator "in" requires an array value for field "${where.field}" on model "${model}".`,
+          );
+        }
 
         if (fieldAttributes?.references && typeof value === "string") {
           const refTable = fieldAttributes.references.model;
@@ -476,9 +568,11 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
             return customExpr((ctx) => `string::starts_with(${ident}, ${ctx.def(value)})`);
           case "ends_with":
             return customExpr((ctx) => `string::ends_with(${ident}, ${ctx.def(value)})`);
-          default:
-            return eq(ident, value);
         }
+
+        throw adapterError(
+          `Unsupported operator "${operator}" for field "${where.field}" on model "${model}".`,
+        );
       };
 
       const buildWhereExpr = (model: string, where?: Where[]): ExprLike | null => {
@@ -517,19 +611,34 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         return new BoundQuery(sqlForTarget, { target });
       };
 
-      const queryMany = async <T>(query: BoundQuery): Promise<T[]> => {
-        const [rows] = await executeQuery<QueryResultRows<T>>(client, query);
-        return rows ?? [];
+      const queryMany = async <T>(query: BoundQuery, context = "reading records"): Promise<T[]> => {
+        try {
+          const [rows] = await executeQuery<QueryResultRows<T>>(client, query);
+          return rows ?? [];
+        } catch (error) {
+          return wrapQueryError(error, context);
+        }
       };
 
-      const queryOne = async <T>(query: BoundQuery): Promise<T | null> => {
-        const [rows] = await executeQuery<QueryResultRows<T>>(client, query);
-        return rows?.[0] ?? null;
+      const queryOne = async <T>(query: BoundQuery, context = "reading a record"): Promise<T | null> => {
+        try {
+          const [rows] = await executeQuery<QueryResultRows<T>>(client, query);
+          return rows?.[0] ?? null;
+        } catch (error) {
+          return wrapQueryError(error, context);
+        }
       };
 
-      const queryScalar = async <T>(query: BoundQuery): Promise<T | null> => {
-        const [value] = await executeQuery<[T]>(client, query);
-        return value ?? null;
+      const queryScalar = async <T>(
+        query: BoundQuery,
+        context = "reading a scalar value",
+      ): Promise<T | null> => {
+        try {
+          const [value] = await executeQuery<[T]>(client, query);
+          return value ?? null;
+        } catch (error) {
+          return wrapQueryError(error, context);
+        }
       };
 
       return {
@@ -549,7 +658,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           appendWhere(query, tableName, rest);
           query.append(" GROUP ALL");
 
-          const rows = await queryMany<{ count: number }>(query);
+          const rows = await queryMany<{ count: number }>(query, `counting records in "${tableName}"`);
           return rows[0]?.count ?? 0;
         },
 
@@ -584,7 +693,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
             }
           }
 
-          const created = await queryOne<T>(query);
+          const created = await queryOne<T>(query, `creating a record in "${tableName}"`);
           if (!created) {
             throw adapterError(`Failed to create record in "${tableName}".`);
           }
@@ -611,7 +720,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           appendWhere(query, tableName, rest);
           query.append(" LIMIT 1");
 
-          return queryOne<T>(query);
+          return queryOne<T>(query, `finding one record in "${tableName}"`);
         },
 
         findMany: async <T>({
@@ -653,7 +762,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
             query.append(` START ${offset}`);
           }
 
-          return queryMany<T>(query);
+          return queryMany<T>(query, `finding records in "${tableName}"`);
         },
 
         update: async <T>({
@@ -682,7 +791,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           appendWhere(query, tableName, rest);
           query.append(" RETURN AFTER");
 
-          return queryOne<T>(query);
+          return queryOne<T>(query, `updating a record in "${tableName}"`);
         },
 
         updateMany: async ({
@@ -710,7 +819,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           appendWhere(query, tableName, rest);
           query.append(" RETURN VALUE id))");
 
-          return (await queryScalar<number>(query)) ?? 0;
+          return (await queryScalar<number>(query, `updating records in "${tableName}"`)) ?? 0;
         },
 
         delete: async ({ model, where }: { model: string; where: Where[] }): Promise<void> => {
@@ -725,7 +834,11 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           );
 
           appendWhere(query, tableName, rest);
-          await executeQuery(client, query);
+          try {
+            await executeQuery(client, query);
+          } catch (error) {
+            wrapQueryError(error, `deleting records from "${tableName}"`);
+          }
         },
 
         deleteMany: async ({
@@ -748,7 +861,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           appendWhere(query, tableName, rest);
           query.append(" RETURN VALUE id))");
 
-          return (await queryScalar<number>(query)) ?? 0;
+          return (await queryScalar<number>(query, `deleting records from "${tableName}"`)) ?? 0;
         },
 
         createSchema: async ({

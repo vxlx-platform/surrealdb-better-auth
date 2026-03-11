@@ -123,4 +123,22 @@ describe("Adapter findMany - Pagination, Sorting & Filtering", () => {
     expect(results[0]!.name as string).toBe("Charlie");
     expect(results[1]!.name as string).toBe("Diana");
   });
+
+  it("rejects unsupported operators explicitly", async () => {
+    await expect(
+      adapter.findMany<Record<string, unknown>>({
+        model: "user",
+        where: [{ field: "email", operator: "not_in" as any, value: ["alice@example.com"] }],
+      }),
+    ).rejects.toThrow(/Unsupported operator "not_in"/);
+  });
+
+  it('rejects non-array values for the "in" operator', async () => {
+    await expect(
+      adapter.findMany<Record<string, unknown>>({
+        model: "user",
+        where: [{ field: "email", operator: "in", value: "alice@example.com" as any }],
+      }),
+    ).rejects.toThrow(/Value must be an array/);
+  });
 });

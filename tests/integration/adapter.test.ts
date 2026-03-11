@@ -55,6 +55,32 @@ describe("surrealdb-adapter CRUD", () => {
     ).rejects.toThrow();
   });
 
+  it("shapes unique constraint violations clearly for duplicate email writes", async () => {
+    await adapter.create<UserRow>({
+      model: "user",
+      data: {
+        name: "First Duplicate",
+        email: "duplicate@example.com",
+        emailVerified: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
+
+    await expect(
+      adapter.create({
+        model: "user",
+        data: {
+          name: "Second Duplicate",
+          email: "duplicate@example.com",
+          emailVerified: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      }),
+    ).rejects.toThrow(/Unique constraint violation while creating a record in "user"/);
+  });
+
   it("rejects queries that reference an unknown field", async () => {
     await expect(
       adapter.findMany({
