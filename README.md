@@ -331,6 +331,50 @@ SURREALDB_ACCESS=better_auth_user bun run dev:server
 
 If `SURREALDB_ACCESS` is not set, the example server emits a more generic Better Auth JWT payload instead of SurrealDB-specific record-access claims.
 
+## JWT Auth with SurrealDB Record Access
+
+If you want SurrealDB to accept Better Auth JWTs directly, define a record access method that trusts your Better Auth JWKS endpoint:
+
+```surql
+DEFINE ACCESS better_auth_user
+  ON DATABASE
+  TYPE RECORD
+  WITH JWT URL "http://127.0.0.1:3000/api/auth/.well-known";
+```
+
+For SurrealDB `TYPE RECORD ... WITH JWT`, the JWT should include:
+
+- `exp`
+- `ns`
+- `db`
+- `ac`
+- `id` as a record id such as `user:abc123`
+
+The example Bun server can shape tokens for this flow when `SURREALDB_ACCESS` is set to the same access name:
+
+```bash
+SURREALDB_ACCESS=better_auth_user bun run dev:server
+```
+
+Then you can fetch a Better Auth token from your app and authenticate a SurrealDB client with it:
+
+```ts
+const tokenResponse = await fetch("http://127.0.0.1:3000/api/auth/token", {
+  credentials: "include",
+});
+
+const { token } = await tokenResponse.json();
+
+const db = new Surreal();
+await db.connect("ws://127.0.0.1:8000/rpc");
+await db.use({ namespace: "main", database: "main" });
+await db.authenticate(token);
+
+const [authRef] = await db.query("RETURN $auth;");
+```
+
+In this flow, `$auth` resolves to the authenticated record reference, and `SELECT * FROM ONLY $auth` returns the full user record.
+
 ## Browser Tests
 
 This repo keeps browser-focused checks separate from the main node/integration suite.
