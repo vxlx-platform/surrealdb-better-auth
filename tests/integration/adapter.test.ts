@@ -279,6 +279,11 @@ describe("surrealdb-adapter CRUD", () => {
           },
         });
 
+        const usersInTransaction = await trx.findMany<UserRow>({
+          model: "user",
+        });
+        expect(usersInTransaction).toHaveLength(1);
+
         throw new Error("rollback this transaction");
       }),
     ).rejects.toThrow("rollback this transaction");
