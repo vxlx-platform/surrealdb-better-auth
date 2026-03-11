@@ -107,6 +107,10 @@ export interface SurrealAdapterConfig {
  */
 type QueryTarget = Table | RecordId | RecordId[];
 
+type QueryExecutor = {
+  query<R extends unknown[]>(query: string | BoundQuery<R>): Promise<R>;
+};
+
 /**
  * Expected SurrealDB row result shape for standard record-returning queries.
  */
@@ -138,6 +142,34 @@ const UUID_LITERAL_RE = /^u(['"])(.+)\1$/;
  * @returns A Better Auth adapter factory configured for SurrealDB.
  */
 export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
+  let connectionLock = Promise.resolve();
+  let runtimeAdapterFactory:
+    | ((executor: QueryExecutor) => Record<string, unknown>)
+    | null = null;
+
+  const withConnectionLock = async <T>(callback: () => Promise<T>): Promise<T> => {
+    const previous = connectionLock;
+    let release!: () => void;
+    connectionLock = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    await previous;
+
+    try {
+      return await callback();
+    } finally {
+      release();
+    }
+  };
+
+  const runDbQuery = async <T extends unknown[]>(query: string | BoundQuery<T>): Promise<T> => {
+    if (typeof query === "string") {
+      return (await db.query<T>(query)) as T;
+    }
+    return (await db.query<T>(query)) as T;
+  };
+
   /**
    * Resolves the record-id generation strategy for a given table.
    *
@@ -243,7 +275,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
     return value;
   };
 
-  return createAdapterFactory({
+  const baseFactory = createAdapterFactory({
     config: {
       adapterId: "surrealdb-adapter",
       adapterName: "SurrealDB Adapter",
@@ -288,6 +320,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         }
         return data;
       },
+
     },
 
     adapter: ({ getModelName, getFieldName, getFieldAttributes }) => {
@@ -508,255 +541,317 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         return new BoundQuery(sqlForTarget, { target });
       };
 
-      /**
-       * Executes a query expected to return many rows.
-       */
-      const queryMany = async <T>(query: BoundQuery): Promise<T[]> => {
-        const [rows] = await db.query<QueryResultRows<T>>(query);
-        return rows ?? [];
-      };
+      const createRuntimeAdapter = (executor: QueryExecutor) => {
+        /**
+         * Executes a query expected to return many rows.
+         */
+        const queryMany = async <T>(query: BoundQuery): Promise<T[]> => {
+          const [rows] = await executor.query<QueryResultRows<T>>(query);
+          return rows ?? [];
+        };
 
-      /**
-       * Executes a query expected to return zero or one row.
-       */
-      const queryOne = async <T>(query: BoundQuery): Promise<T | null> => {
-        const [rows] = await db.query<QueryResultRows<T>>(query);
-        return rows?.[0] ?? null;
-      };
+        /**
+         * Executes a query expected to return zero or one row.
+         */
+        const queryOne = async <T>(query: BoundQuery): Promise<T | null> => {
+          const [rows] = await executor.query<QueryResultRows<T>>(query);
+          return rows?.[0] ?? null;
+        };
 
-      /**
-       * Executes a query expected to return a single scalar value.
-       */
-      const queryScalar = async <T>(query: BoundQuery): Promise<T | null> => {
-        const [value] = await db.query<[T]>(query);
-        return value ?? null;
-      };
+        /**
+         * Executes a query expected to return a single scalar value.
+         */
+        const queryScalar = async <T>(query: BoundQuery): Promise<T | null> => {
+          const [value] = await executor.query<[T]>(query);
+          return value ?? null;
+        };
 
-      return {
-        options: config,
+        return {
+          options: config,
 
-        count: async ({ model, where }: { model: string; where?: Where[] }): Promise<number> => {
-          const tableName = getModelName(model);
-          const { target, rest } = splitIdWhere(tableName, where);
+          count: async ({ model, where }: { model: string; where?: Where[] }): Promise<number> => {
+            const tableName = getModelName(model);
+            const { target, rest } = splitIdWhere(tableName, where);
 
-          const query = makeTargetQuery(
-            (tb) => `SELECT count() AS count FROM ${escapeIdent(tb)}`,
-            "SELECT count() AS count FROM $target",
-            tableName,
-            target,
-          );
+            const query = makeTargetQuery(
+              (tb) => `SELECT count() AS count FROM ${escapeIdent(tb)}`,
+              "SELECT count() AS count FROM $target",
+              tableName,
+              target,
+            );
 
-          appendWhere(query, tableName, rest);
-          query.append(" GROUP ALL");
+            appendWhere(query, tableName, rest);
+            query.append(" GROUP ALL");
 
-          const rows = await queryMany<{ count: number }>(query);
-          return rows[0]?.count ?? 0;
-        },
+            const rows = await queryMany<{ count: number }>(query);
+            return rows[0]?.count ?? 0;
+          },
 
-        create: async <T>({ model, data }: { model: string; data: T }): Promise<T> => {
-          const tableName = getModelName(model);
-          const payload = data as Record<string, unknown>;
-          const content = normalizeNullToNone(stripIdFromPayload(payload));
+          create: async <T>({ model, data }: { model: string; data: T }): Promise<T> => {
+            const tableName = getModelName(model);
+            const payload = data as Record<string, unknown>;
+            const content = normalizeNullToNone(stripIdFromPayload(payload));
 
-          const rawId = payload.id;
+            const rawId = payload.id;
 
-          let query: BoundQuery;
+            let query: BoundQuery;
 
-          if (rawId != null) {
-            const rid = toRecordId(tableName, rawId);
-            query = new BoundQuery(`CREATE $rid CONTENT $data`, { rid, data: content });
-          } else {
-            const fmt = resolveIdFormat(tableName);
-
-            if (fmt === "ulid") {
-              query = new BoundQuery(`CREATE ${escapeIdent(tableName)}:ulid() CONTENT $data`, {
-                data: content,
-              });
-            } else if (fmt === "uuidv7") {
-              query = new BoundQuery(`CREATE ${escapeIdent(tableName)}:uuid() CONTENT $data`, {
-                data: content,
-              });
+            if (rawId != null) {
+              const rid = toRecordId(tableName, rawId);
+              query = new BoundQuery(`CREATE $rid CONTENT $data`, { rid, data: content });
             } else {
-              // "random" (default)
-              query = new BoundQuery(`CREATE ${escapeIdent(tableName)} CONTENT $data`, {
-                data: content,
-              });
+              const fmt = resolveIdFormat(tableName);
+
+              if (fmt === "ulid") {
+                query = new BoundQuery(`CREATE ${escapeIdent(tableName)}:ulid() CONTENT $data`, {
+                  data: content,
+                });
+              } else if (fmt === "uuidv7") {
+                query = new BoundQuery(`CREATE ${escapeIdent(tableName)}:uuid() CONTENT $data`, {
+                  data: content,
+                });
+              } else {
+                query = new BoundQuery(`CREATE ${escapeIdent(tableName)} CONTENT $data`, {
+                  data: content,
+                });
+              }
             }
-          }
 
-          const created = await queryOne<T>(query);
-          if (!created) throw new Error(`Failed to create record in ${tableName}`);
-          return created;
-        },
+            const created = await queryOne<T>(query);
+            if (!created) throw new Error(`Failed to create record in ${tableName}`);
+            return created;
+          },
 
-        findOne: async <T>({
-          model,
-          where,
-        }: {
-          model: string;
-          where: Where[];
-        }): Promise<T | null> => {
-          const tableName = getModelName(model);
-          const { target, rest } = splitIdWhere(tableName, where);
+          findOne: async <T>({
+            model,
+            where,
+          }: {
+            model: string;
+            where: Where[];
+          }): Promise<T | null> => {
+            const tableName = getModelName(model);
+            const { target, rest } = splitIdWhere(tableName, where);
 
-          const query = makeTargetQuery(
-            (tb) => `SELECT * FROM ${escapeIdent(tb)}`,
-            "SELECT * FROM $target",
-            tableName,
-            target,
-          );
+            const query = makeTargetQuery(
+              (tb) => `SELECT * FROM ${escapeIdent(tb)}`,
+              "SELECT * FROM $target",
+              tableName,
+              target,
+            );
 
-          appendWhere(query, tableName, rest);
-          query.append(" LIMIT 1");
+            appendWhere(query, tableName, rest);
+            query.append(" LIMIT 1");
 
-          return queryOne<T>(query);
-        },
+            return queryOne<T>(query);
+          },
 
-        findMany: async <T>({
-          model,
-          where,
-          limit,
-          offset,
-          sortBy,
-        }: {
-          model: string;
-          where?: Where[];
-          limit?: number;
-          offset?: number;
-          sortBy?: { field: string; direction: "asc" | "desc" };
-        }): Promise<T[]> => {
-          const tableName = getModelName(model);
-          const { target, rest } = splitIdWhere(tableName, where);
+          findMany: async <T>({
+            model,
+            where,
+            limit,
+            offset,
+            sortBy,
+          }: {
+            model: string;
+            where?: Where[];
+            limit?: number;
+            offset?: number;
+            sortBy?: { field: string; direction: "asc" | "desc" };
+          }): Promise<T[]> => {
+            const tableName = getModelName(model);
+            const { target, rest } = splitIdWhere(tableName, where);
 
-          const query = makeTargetQuery(
-            (tb) => `SELECT * FROM ${escapeIdent(tb)}`,
-            "SELECT * FROM $target",
-            tableName,
-            target,
-          );
+            const query = makeTargetQuery(
+              (tb) => `SELECT * FROM ${escapeIdent(tb)}`,
+              "SELECT * FROM $target",
+              tableName,
+              target,
+            );
 
-          appendWhere(query, tableName, rest);
+            appendWhere(query, tableName, rest);
 
-          if (sortBy) {
-            const sortField = escapeIdent(getFieldName({ field: sortBy.field, model }));
-            const sortDirection = sortBy.direction === "desc" ? "DESC" : "ASC";
-            query.append(` ORDER BY ${sortField} ${sortDirection}`);
-          }
+            if (sortBy) {
+              const sortField = escapeIdent(getFieldName({ field: sortBy.field, model }));
+              const sortDirection = sortBy.direction === "desc" ? "DESC" : "ASC";
+              query.append(` ORDER BY ${sortField} ${sortDirection}`);
+            }
 
-          if (typeof limit === "number") {
-            query.append(` LIMIT ${limit}`);
-          }
+            if (typeof limit === "number") {
+              query.append(` LIMIT ${limit}`);
+            }
 
-          if (typeof offset === "number") {
-            query.append(` START ${offset}`);
-          }
+            if (typeof offset === "number") {
+              query.append(` START ${offset}`);
+            }
 
-          return queryMany<T>(query);
-        },
+            return queryMany<T>(query);
+          },
 
-        update: async <T>({
-          model,
-          where,
-          update,
-        }: {
-          model: string;
-          where: Where[];
-          update: T;
-        }): Promise<T | null> => {
-          const tableName = getModelName(model);
-          const { target, rest = [] } = splitIdWhere(tableName, where);
-          const patch = normalizeNullToNone(stripIdFromPayload(update as Record<string, unknown>));
+          update: async <T>({
+            model,
+            where,
+            update,
+          }: {
+            model: string;
+            where: Where[];
+            update: T;
+          }): Promise<T | null> => {
+            const tableName = getModelName(model);
+            const { target, rest = [] } = splitIdWhere(tableName, where);
+            const patch = normalizeNullToNone(
+              stripIdFromPayload(update as Record<string, unknown>),
+            );
 
-          const query = makeTargetQuery(
-            (tb) => `UPDATE ${escapeIdent(tb)}`,
-            "UPDATE $target",
-            tableName,
-            target,
-          );
+            const query = makeTargetQuery(
+              (tb) => `UPDATE ${escapeIdent(tb)}`,
+              "UPDATE $target",
+              tableName,
+              target,
+            );
 
-          query.append(surql` MERGE ${patch}`);
-          appendWhere(query, tableName, rest);
-          query.append(" RETURN AFTER");
+            query.append(surql` MERGE ${patch}`);
+            appendWhere(query, tableName, rest);
+            query.append(" RETURN AFTER");
 
-          return queryOne<T>(query);
-        },
+            return queryOne<T>(query);
+          },
 
-        updateMany: async ({
-          model,
-          update,
-          where,
-        }: {
-          model: string;
-          update: Record<string, unknown>;
-          where: Where[];
-        }): Promise<number> => {
-          const tableName = getModelName(model);
-          const { target, rest } = splitIdWhere(tableName, where);
-          const patch = normalizeNullToNone(stripIdFromPayload(update));
+          updateMany: async ({
+            model,
+            update,
+            where,
+          }: {
+            model: string;
+            update: Record<string, unknown>;
+            where: Where[];
+          }): Promise<number> => {
+            const tableName = getModelName(model);
+            const { target, rest } = splitIdWhere(tableName, where);
+            const patch = normalizeNullToNone(stripIdFromPayload(update));
 
-          const query = makeTargetQuery(
-            (tb) => `RETURN array::len((UPDATE ${escapeIdent(tb)}`,
-            "RETURN array::len((UPDATE $target",
-            tableName,
-            target,
-          );
+            const query = makeTargetQuery(
+              (tb) => `RETURN array::len((UPDATE ${escapeIdent(tb)}`,
+              "RETURN array::len((UPDATE $target",
+              tableName,
+              target,
+            );
 
-          query.append(surql` MERGE ${patch}`);
-          appendWhere(query, tableName, rest);
-          query.append(" RETURN VALUE id))");
+            query.append(surql` MERGE ${patch}`);
+            appendWhere(query, tableName, rest);
+            query.append(" RETURN VALUE id))");
 
-          return (await queryScalar<number>(query)) ?? 0;
-        },
+            return (await queryScalar<number>(query)) ?? 0;
+          },
 
-        delete: async ({ model, where }: { model: string; where: Where[] }): Promise<void> => {
-          const tableName = getModelName(model);
-          const { target, rest } = splitIdWhere(tableName, where);
+          delete: async ({ model, where }: { model: string; where: Where[] }): Promise<void> => {
+            const tableName = getModelName(model);
+            const { target, rest } = splitIdWhere(tableName, where);
 
-          const query = makeTargetQuery(
-            (tb) => `DELETE ${escapeIdent(tb)}`,
-            "DELETE $target",
-            tableName,
-            target,
-          );
+            const query = makeTargetQuery(
+              (tb) => `DELETE ${escapeIdent(tb)}`,
+              "DELETE $target",
+              tableName,
+              target,
+            );
 
-          appendWhere(query, tableName, rest);
-          await db.query(query);
-        },
+            appendWhere(query, tableName, rest);
+            await executor.query(query);
+          },
 
-        deleteMany: async ({
-          model,
-          where,
-        }: {
-          model: string;
-          where: Where[];
-        }): Promise<number> => {
-          const tableName = getModelName(model);
-          const { target, rest } = splitIdWhere(tableName, where);
+          deleteMany: async ({
+            model,
+            where,
+          }: {
+            model: string;
+            where: Where[];
+          }): Promise<number> => {
+            const tableName = getModelName(model);
+            const { target, rest } = splitIdWhere(tableName, where);
 
-          const query = makeTargetQuery(
-            (tb) => `RETURN array::len((DELETE ${escapeIdent(tb)}`,
-            "RETURN array::len((DELETE $target",
-            tableName,
-            target,
-          );
+            const query = makeTargetQuery(
+              (tb) => `RETURN array::len((DELETE ${escapeIdent(tb)}`,
+              "RETURN array::len((DELETE $target",
+              tableName,
+              target,
+            );
 
-          appendWhere(query, tableName, rest);
-          query.append(" RETURN VALUE id))");
+            appendWhere(query, tableName, rest);
+            query.append(" RETURN VALUE id))");
 
-          return (await queryScalar<number>(query)) ?? 0;
-        },
+            return (await queryScalar<number>(query)) ?? 0;
+          },
 
-        createSchema: async (options) => {
-          return generateSurqlSchema({
-            ...options,
-            getModelName,
-            getFieldName,
-            apiEndpoints: config?.apiEndpoints,
-          });
-        },
+          createSchema: async ({
+            file,
+            tables,
+          }: {
+            file?: string;
+            tables: BetterAuthDBSchema;
+          }) => {
+            return generateSurqlSchema({
+              file,
+              tables,
+              getModelName,
+              getFieldName,
+              apiEndpoints: config?.apiEndpoints,
+            });
+          },
+        };
       };
+
+      runtimeAdapterFactory = createRuntimeAdapter;
+
+      const baseExecutor: QueryExecutor = {
+        query: async <T extends unknown[]>(query: string | BoundQuery<T>) =>
+          withConnectionLock(() => runDbQuery<T>(query)),
+      };
+
+      return createRuntimeAdapter(baseExecutor);
     },
   });
+
+  return (options: BetterAuthOptions) => {
+    const adapter = baseFactory(options);
+    const createRuntimeAdapter = runtimeAdapterFactory;
+
+    if (!createRuntimeAdapter) {
+      throw new Error("Failed to initialize the SurrealDB runtime adapter.");
+    }
+
+    adapter.transaction = async <R>(callback: (trx: typeof adapter) => Promise<R>) => {
+      const session = await db.forkSession();
+
+      try {
+        const transaction = await session.beginTransaction();
+        const transactionExecutor: QueryExecutor = {
+          query: async <T extends unknown[]>(query: string | BoundQuery<T>) => {
+            if (typeof query === "string") {
+              return (await transaction.query<T>(query)) as T;
+            }
+            return (await transaction.query<T>(query)) as T;
+          },
+        };
+
+        try {
+          const transactionAdapter = createRuntimeAdapter(transactionExecutor) as typeof adapter;
+          const result = await callback(transactionAdapter);
+          await transaction.commit();
+          return result;
+        } catch (error) {
+          try {
+            await transaction.cancel();
+          } catch {
+            // Preserve the original error when rollback also fails.
+          }
+          throw error;
+        }
+      } finally {
+        await session.closeSession();
+      }
+    };
+
+    return adapter;
+  };
 };
 
 /**

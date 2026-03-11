@@ -193,4 +193,59 @@ describe("surrealdb-adapter CRUD", () => {
     const count = await adapter.count({ model: "user" });
     expect(count).toBe(2);
   });
+
+  it("commits writes inside adapter.transaction", async () => {
+    await adapter.transaction(async (trx) => {
+      await trx.create({
+        model: "user",
+        data: {
+          name: "Transaction One",
+          email: "tx-1@example.com",
+          emailVerified: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+
+      await trx.create({
+        model: "user",
+        data: {
+          name: "Transaction Two",
+          email: "tx-2@example.com",
+          emailVerified: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+    });
+
+    const users = await adapter.findMany<UserRow>({
+      model: "user",
+      sortBy: { field: "email", direction: "asc" },
+    });
+
+    expect(users.map((user) => user.email)).toEqual(["tx-1@example.com", "tx-2@example.com"]);
+  });
+
+  it("rolls back writes when adapter.transaction throws", async () => {
+    await expect(
+      adapter.transaction(async (trx) => {
+        await trx.create({
+          model: "user",
+          data: {
+            name: "Rollback User",
+            email: "rollback@example.com",
+            emailVerified: false,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        });
+
+        throw new Error("rollback this transaction");
+      }),
+    ).rejects.toThrow("rollback this transaction");
+
+    const count = await adapter.count({ model: "user" });
+    expect(count).toBe(0);
+  });
 });

@@ -22,6 +22,7 @@ If you're using Better Auth with the SurrealDB JavaScript SDK v2 client, this ad
 - SurrealDB JavaScript SDK v2-first adapter for Better Auth
 - Better Auth adapter factory integration (`createAdapterFactory`)
 - Full CRUD support (`create`, `findOne`, `findMany`, `count`, `update`, `updateMany`, `delete`, `deleteMany`)
+- Better Auth transaction support via `adapter.transaction(...)`
 - SurrealDB record-link support for referenced fields (`record<...>`)
 - Configurable record id generation strategy:
   - `random` (default)
@@ -185,14 +186,47 @@ surrealAdapter(db, {
 
 This lets Better Auth continue working with plain string ids while the SurrealDB JavaScript SDK v2 keeps native record semantics under the hood.
 
+## Transactions
+
+The adapter implements Better Auth's transaction hook using the SurrealDB JavaScript SDK v2 session transaction API. Internally it forks the active session, starts a transaction, runs the callback against that transaction-scoped session, and then commits or cancels it.
+
+Usage:
+
+```ts
+await adapter.transaction(async (trx) => {
+  const user = await trx.create({
+    model: "user",
+    data: {
+      name: "Transactional User",
+      email: "tx@example.com",
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  });
+
+  await trx.create({
+    model: "session",
+    data: {
+      userId: user.id,
+      token: "session-token",
+      expiresAt: new Date(Date.now() + 1000 * 60 * 60),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  });
+});
+```
+
+If the callback throws, the adapter cancels the transaction and rethrows the original error.
+
 ## Optional DEFINE API Endpoints
 
 You can optionally include read-only `DEFINE API` endpoints for the Better Auth `user`, `session`, `account`, and `jwks` tables that exist in your schema.
 
 ```ts
 surrealAdapter(db, {
-  apiEndpoints: {
-  },
+  apiEndpoints: {},
 });
 ```
 
@@ -412,8 +446,7 @@ const result = await generateSurqlSchema({
   tables,
   getModelName,
   getFieldName,
-  apiEndpoints: {
-  },
+  apiEndpoints: {},
 });
 
 // result.path -> "better-auth-schema.surql"
@@ -444,3 +477,7 @@ Test DB scope can be configured with:
 - `SURREALDB_TEST_NAMESPACE` (default: `main`)
 - `SURREALDB_TEST_DATABASE` (default: `main`)
 - `SURREALDB_TEST_ISOLATE=1` to append worker ids for parallel isolation
+
+## TODO
+
+- Expand transaction coverage to mixed Better Auth plugin flows that perform multiple model writes in one callback.
