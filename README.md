@@ -25,7 +25,7 @@ If you're using Better Auth with the SurrealDB JavaScript SDK v2 client, this ad
 - Better Auth transaction support via `adapter.transaction(...)`
 - SurrealDB record-link support for referenced fields (`record<...>`)
 - Configurable record id generation strategy:
-  - `random` (default)
+  - `native` (default)
   - `ulid`
   - `uuidv7`
   - per-table function
@@ -65,7 +65,11 @@ Boolean connectors:
 - ✅ **`AND`**
 - ✅ **`OR`**
 
-When you filter by related records, the adapter automatically converts those values into SurrealDB `RecordId`s for you.
+Unsupported operators are rejected explicitly instead of silently falling back to equality.
+
+For the `in` operator, Better Auth validates that the value is an array before the adapter runs.
+
+When you filter by related records, the adapter automatically converts plain Better Auth ids into SurrealDB `RecordId`s for you. If you pass an explicit record id, it must match the referenced table.
 
 ### Query Operator Examples
 
@@ -182,8 +186,23 @@ surrealAdapter(db, {
 - Primary ids are represented as SurrealDB record ids (e.g. `user:abc123`) internally.
 - Adapter output normalizes ids to plain components (`abc123`) for Better Auth.
 - Reference fields are transformed to `RecordId` values on writes/filters and normalized back on reads.
+- Plain Better Auth ids such as `abc123` are accepted for reference fields and converted to the expected SurrealDB record id automatically.
+- Explicit record ids such as `user:abc123` are accepted for reference fields when they match the referenced table.
+- Explicit wrong-table record ids such as `account:abc123` for a `userId` reference are rejected early.
 
 This lets Better Auth continue working with plain string ids while the SurrealDB JavaScript SDK v2 keeps native record semantics under the hood.
+
+## Error Handling
+
+The adapter prefers SurrealDB SDK-defined errors where possible and then adds adapter-scoped context for common failures.
+
+Current behavior includes clearer handling for:
+
+- connection/session/setup failures from the SurrealDB SDK
+- unique constraint violations
+- invalid reference-field values and field coercion failures
+
+Malformed `where` input that Better Auth validates itself, such as a non-array value for the `in` operator, will still fail at the Better Auth layer before the adapter runs.
 
 ## Transactions
 
