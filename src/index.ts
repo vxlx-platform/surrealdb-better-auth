@@ -16,6 +16,7 @@ import {
   RecordId,
   ServerError,
   StringRecordId,
+  type SurrealQueryable,
   type SurrealSession,
   type Surreal,
   SurrealError,
@@ -123,20 +124,6 @@ type InternalSurrealAdapterConfig = SurrealAdapterConfig & {
  */
 type QueryTarget = Table | RecordId | RecordId[];
 
-type SurrealQueryClient = {
-  query<R extends unknown[] = unknown[]>(
-    query: string,
-    bindings?: Record<string, unknown>,
-  ): Promise<R>;
-  query<R extends unknown[] = unknown[]>(query: BoundQuery<R>): Promise<R>;
-};
-
-type SurrealSessionClient = SurrealSession;
-
-type SurrealSessionCapableClient = Surreal & {
-  forkSession(): Promise<SurrealSessionClient>;
-};
-
 type ModelFieldContext = {
   dbFieldName: string;
   fieldAttributes: ReturnType<
@@ -190,7 +177,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
   };
 
   const hasForkSessionMethod =
-    "forkSession" in db && typeof (db as SurrealSessionCapableClient).forkSession === "function";
+    "forkSession" in db && typeof db.forkSession === "function";
 
   const detectTransactionFeatureSupport = (): boolean | null => {
     if (typeof db.isFeatureSupported !== "function") {
@@ -218,7 +205,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
   };
 
   const executeQuery = async <T extends unknown[]>(
-    client: SurrealQueryClient,
+    client: Pick<SurrealQueryable, "query">,
     query: string | BoundQuery<T>,
   ): Promise<T> => {
     if (typeof query === "string") {
@@ -398,7 +385,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
   };
 
   const createCustomAdapter =
-    (client: SurrealQueryClient) =>
+    (client: Pick<SurrealQueryable, "query">) =>
     ({
       getModelName,
       getFieldName,
@@ -1090,10 +1077,10 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
                 return runWithoutDatabaseTransaction();
               }
 
-              let session: SurrealSessionClient | null = null;
+              let session: SurrealSession | null = null;
 
               try {
-                session = await (db as SurrealSessionCapableClient).forkSession();
+                session = await db.forkSession();
               } catch (error) {
                 if (isUnsupportedSessionsFeatureError(error) && transactionMode !== true) {
                   runtimeTransactionDisabled = true;
