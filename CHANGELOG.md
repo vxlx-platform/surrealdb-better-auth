@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-03-12
+
+### Changed
+
+- Refactored shared query-target preparation paths in the adapter to reduce duplicated logic across `count`, `findOne`, `findMany`, `update`, `updateMany`, `delete`, and `deleteMany`.
+- Improved SurrealDB query error classification and shaping for field coercion and unique-constraint violations with clearer adapter-level error messages.
+- Streamlined integration test setup/teardown and fixture generation to reduce duplication and improve reliability across auth/core/plugin feature coverage.
+
 ## [0.5.0] - 2026-03-12
 
 ### Added
