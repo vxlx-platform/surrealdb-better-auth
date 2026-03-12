@@ -2,9 +2,9 @@ import type { DBAdapter } from "@better-auth/core/db/adapter";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
 
-describe("E2E Authentication Flow & CRUD Validation", () => {
+describe("Auth Flow - Email/Password", () => {
   let db: Surreal;
   let auth: Awaited<ReturnType<typeof buildAdapter>>["auth"];
   let adapter: DBAdapter;
@@ -248,7 +248,7 @@ describe("E2E Authentication Flow & CRUD Validation", () => {
   });
 });
 
-describe("Email Verification Flow", () => {
+describe("Auth Flow - Email Verification", () => {
   let db: Surreal;
   let auth: Awaited<ReturnType<typeof buildAdapter>>["auth"];
   let adapter: DBAdapter;

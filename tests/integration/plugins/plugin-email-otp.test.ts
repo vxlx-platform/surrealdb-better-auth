@@ -4,7 +4,7 @@ import { emailOTP } from "better-auth/plugins";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
 
 const _getAuthType = () =>
   betterAuth({
@@ -19,7 +19,7 @@ const _getAuthType = () =>
 
 type AuthWithEmailOTP = ReturnType<typeof _getAuthType>;
 
-describe("Email OTP Plugin Authentication Flow", () => {
+describe("Plugin - Email OTP", () => {
   let db: Surreal;
   let auth: AuthWithEmailOTP;
   let adapter: DBAdapter;

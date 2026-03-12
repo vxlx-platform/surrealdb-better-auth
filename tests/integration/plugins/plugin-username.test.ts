@@ -4,7 +4,7 @@ import { username } from "better-auth/plugins";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
 
 // 1. Create a dummy auth configuration purely for strict type inference.
 // We use 'as any' ONLY for the dummy database since it never runs.
@@ -20,7 +20,7 @@ const _getAuthType = () =>
 // 2. Extract the exact type, which now natively includes `username` fields and endpoints!
 type AuthWithUsername = ReturnType<typeof _getAuthType>;
 
-describe("Username Plugin Authentication Flow", () => {
+describe("Plugin - Username", () => {
   let db: Surreal;
   // 3. Strongly type our test instance
   let auth: AuthWithUsername;

@@ -2,12 +2,12 @@ import type { DBAdapter } from "@better-auth/core/db/adapter";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { getHttpApiBaseUrl, getSurrealHttpHeaders } from "../__helpers__/env";
-import { expectOkJson } from "../__helpers__/http";
-import { startTestServer, type TestServerHandle } from "../__helpers__/server";
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
+import { getHttpApiBaseUrl, getSurrealHttpHeaders } from "../../__helpers__/env";
+import { expectOkJson } from "../../__helpers__/http";
+import { type TestServerHandle, startTestServer } from "../../__helpers__/server";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
 
-describe("Generated DEFINE API endpoints", () => {
+describe("Feature - Generated DEFINE API Endpoints", () => {
   let db: Surreal;
   let adapter: DBAdapter;
   let apiBaseUrl: string;

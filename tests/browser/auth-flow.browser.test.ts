@@ -16,7 +16,7 @@ const getBaseUrl = () => {
   return "http://127.0.0.1:3002";
 };
 
-describe("Browser auth flows", () => {
+describe("Browser Auth Flow", () => {
   it("fetches /.well-known from a real browser context", async () => {
     const response = await fetch(`${getBaseUrl()}/api/auth/.well-known`, {
       signal: AbortSignal.timeout(5_000),

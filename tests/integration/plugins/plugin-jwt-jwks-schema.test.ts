@@ -4,13 +4,13 @@ import { jwt } from "better-auth/plugins";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import type { JWKSRow } from "../types";
-import { getHttpApiBaseUrl, getSurrealHttpHeaders } from "../__helpers__/env";
-import { expectOkJson } from "../__helpers__/http";
-import { type TestServerHandle, startTestServer } from "../__helpers__/server";
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
+import type { JWKSRow } from "../../types";
+import { getHttpApiBaseUrl, getSurrealHttpHeaders } from "../../__helpers__/env";
+import { expectOkJson } from "../../__helpers__/http";
+import { type TestServerHandle, startTestServer } from "../../__helpers__/server";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
 
-describe("JWT Plugin - JWKS Schema & Database Persistence", () => {
+describe("Plugin - JWT JWKS Schema", () => {
   let masterDb: Surreal;
   let adapter: DBAdapter;
   let authConfig: BetterAuthOptions;

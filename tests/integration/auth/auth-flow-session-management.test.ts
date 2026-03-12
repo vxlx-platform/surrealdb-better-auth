@@ -2,14 +2,14 @@ import type { DBAdapter } from "@better-auth/core/db/adapter";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
 
 type TestSession = {
   headers: Headers;
   token: string;
 };
 
-describe("Session management", () => {
+describe("Auth Flow - Session Management", () => {
   let db: Surreal;
   let auth: Awaited<ReturnType<typeof buildAdapter>>["auth"];
   let adapter: DBAdapter;

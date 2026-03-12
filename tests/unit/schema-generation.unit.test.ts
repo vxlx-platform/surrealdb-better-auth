@@ -7,7 +7,7 @@ type TestSchemaOptions = Parameters<typeof generateSurqlSchema>[0] & {
   apiEndpoints?: boolean | { basePath?: string; models?: string[] };
 };
 
-describe("Adapter Schema Generation (createSchema)", () => {
+describe("Unit - Schema Generation (createSchema)", () => {
   const getModelName = (name: string) => name;
   const getFieldName = (opts: { field: string }) => opts.field;
 

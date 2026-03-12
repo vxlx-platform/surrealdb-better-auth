@@ -5,7 +5,7 @@ import { adminAc, userAc } from "better-auth/plugins/admin/access";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
 
 const _getAuthType = () =>
   betterAuth({
@@ -27,7 +27,7 @@ const _getAuthType = () =>
 
 type AuthWithAdmin = ReturnType<typeof _getAuthType>;
 
-describe("Admin Plugin - Adapter Integration", () => {
+describe("Plugin - Admin", () => {
   let db: Surreal;
   let auth: AuthWithAdmin;
   let adapter: DBAdapter;

@@ -1,9 +1,9 @@
 import type { DBAdapter } from "@better-auth/core/db/adapter";
 import type { BetterAuthOptions } from "better-auth";
-import { Table, type Surreal } from "surrealdb";
+import { type Surreal, Table } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
 
 type CacheEntry = {
   value: string;
@@ -44,7 +44,7 @@ const createInMemorySecondaryStorage = () => {
   };
 };
 
-describe("Secondary storage sessions", () => {
+describe("Feature - Secondary Storage Sessions", () => {
   let db: Surreal;
   let auth: Awaited<ReturnType<typeof buildAdapter>>["auth"];
   let adapter: DBAdapter;

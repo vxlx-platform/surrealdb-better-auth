@@ -1,7 +1,7 @@
 import type { Surreal } from "surrealdb";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../test-utils";
+import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
 
 // Regex patterns for strict ID format validation
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -9,7 +9,7 @@ const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
 // SurrealDB default random IDs are usually alphanumeric
 const RANDOM_ID_REGEX = /^[a-zA-Z0-9]+$/;
 
-describe("Record ID Formats Configuration", () => {
+describe("Adapter Core - Record ID Formats", () => {
   let db: Surreal | undefined;
 
   beforeEach(async () => {

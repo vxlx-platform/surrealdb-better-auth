@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { getScopedDbName } from "../__helpers__/env";
 import { makeUserSeed } from "../__helpers__/factory";
 
-describe("test helpers", () => {
+describe("Unit - Test Helpers", () => {
   it("builds deterministic user seeds with required fields", () => {
     const seed = makeUserSeed();
 

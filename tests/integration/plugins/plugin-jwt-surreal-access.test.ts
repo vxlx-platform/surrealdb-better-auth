@@ -4,11 +4,11 @@ import { jwt } from "better-auth/plugins";
 import { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { executeSurqlSchema } from "../../src";
-import { getScopedDbName, getTestDbEnv } from "../__helpers__/env";
-import { expectOkJson } from "../__helpers__/http";
-import { type TestServerHandle, startTestServer } from "../__helpers__/server";
-import { buildAdapter, ensureSchema } from "../test-utils";
+import { executeSurqlSchema } from "../../../src";
+import { getScopedDbName, getTestDbEnv } from "../../__helpers__/env";
+import { expectOkJson } from "../../__helpers__/http";
+import { type TestServerHandle, startTestServer } from "../../__helpers__/server";
+import { buildAdapter, ensureSchema } from "../../test-utils";
 
 const getCookieHeader = (response: Response) => {
   const setCookies =
@@ -30,7 +30,7 @@ const decodeJwtPayload = (token: string) => {
   return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<string, unknown>;
 };
 
-describe("Better Auth JWT -> SurrealDB access", () => {
+describe("Plugin - JWT SurrealDB Access", () => {
   let masterDb: Surreal;
   let adapter: DBAdapter;
   let authConfig: BetterAuthOptions;

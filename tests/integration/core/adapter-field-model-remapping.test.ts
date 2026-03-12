@@ -1,10 +1,10 @@
 import type { DBAdapter } from "@better-auth/core/db/adapter";
 import type { BetterAuthOptions } from "better-auth";
-import { Table, type Surreal } from "surrealdb";
+import { type Surreal, Table } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { truncateTables } from "../__helpers__/db";
-import { buildAdapter, ensureSchema } from "../test-utils";
+import { truncateTables } from "../../__helpers__/db";
+import { buildAdapter, ensureSchema } from "../../test-utils";
 
 const REMAPPED_AUTH_TABLES = [
   "app_session",
@@ -13,7 +13,7 @@ const REMAPPED_AUTH_TABLES = [
   "app_user",
 ] as const;
 
-describe("Field/Model Remapping", () => {
+describe("Adapter Core - Field/Model Remapping", () => {
   let db: Surreal;
   let auth: Awaited<ReturnType<typeof buildAdapter>>["auth"];
   let adapter: DBAdapter;
