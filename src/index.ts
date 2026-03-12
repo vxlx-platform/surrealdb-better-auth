@@ -1,6 +1,9 @@
 import { type BetterAuthDBSchema, type BetterAuthOptions } from "better-auth";
 import {
+  type AdapterFactoryCustomizeAdapterCreator,
+  type AdapterFactoryOptions,
   type DBAdapterDebugLogOption,
+  type DBTransactionAdapter,
   type Where,
   createAdapterFactory,
 } from "better-auth/adapters";
@@ -16,10 +19,10 @@ import {
   RecordId,
   ServerError,
   StringRecordId,
-  type SurrealQueryable,
-  type SurrealSession,
   type Surreal,
   SurrealError,
+  type SurrealQueryable,
+  type SurrealSession,
   Table,
   UnsupportedFeatureError,
   Uuid,
@@ -116,6 +119,8 @@ type InternalSurrealAdapterConfig = SurrealAdapterConfig & {
   apiEndpoints?: boolean | SurrealApiEndpointsConfig;
 };
 
+type AdapterFactoryHelpers = Parameters<AdapterFactoryCustomizeAdapterCreator>[0];
+
 /**
  * A query target can be:
  * - an entire table
@@ -126,9 +131,7 @@ type QueryTarget = Table | RecordId | RecordId[];
 
 type ModelFieldContext = {
   dbFieldName: string;
-  fieldAttributes: ReturnType<
-    Parameters<Parameters<typeof createAdapterFactory>[0]["adapter"]>[0]["getFieldAttributes"]
-  >;
+  fieldAttributes: ReturnType<AdapterFactoryHelpers["getFieldAttributes"]>;
 };
 
 /**
@@ -176,8 +179,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
     return false;
   };
 
-  const hasForkSessionMethod =
-    "forkSession" in db && typeof db.forkSession === "function";
+  const hasForkSessionMethod = "forkSession" in db && typeof db.forkSession === "function";
 
   const detectTransactionFeatureSupport = (): boolean | null => {
     if (typeof db.isFeatureSupported !== "function") {
@@ -385,12 +387,8 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
   };
 
   const createCustomAdapter =
-    (client: Pick<SurrealQueryable, "query">) =>
-    ({
-      getModelName,
-      getFieldName,
-      getFieldAttributes,
-    }: Parameters<Parameters<typeof createAdapterFactory>[0]["adapter"]>[0]) => {
+    (client: Pick<SurrealQueryable, "query">): AdapterFactoryCustomizeAdapterCreator =>
+    ({ getModelName, getFieldName, getFieldAttributes }: AdapterFactoryHelpers) => {
       const modelNameCache = new Map<string, string>();
       const fieldContextCache = new Map<string, ModelFieldContext>();
 
@@ -977,14 +975,14 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
             getModelName,
             getFieldName,
             apiEndpoints: internalConfig?.apiEndpoints,
-          } as InternalGenerateSurqlSchemaOptions);
+          });
         },
       };
     };
 
   let lazyOptions: BetterAuthOptions | null = null;
 
-  const adapterFactoryOptions = {
+  const adapterFactoryOptions: AdapterFactoryOptions = {
     config: {
       adapterId: "surrealdb-adapter",
       adapterName: "SurrealDB Adapter",
@@ -1052,14 +1050,15 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
       },
       transaction:
         transactionMode === false ||
-        (transactionMode === "auto" && (!hasForkSessionMethod || initialTransactionSupport === false))
+        (transactionMode === "auto" &&
+          (!hasForkSessionMethod || initialTransactionSupport === false))
           ? false
-          : async <R>(callback: (trx: any) => Promise<R>) => {
+          : async <R>(callback: (trx: DBTransactionAdapter) => Promise<R>) => {
               const runWithoutDatabaseTransaction = async () => {
                 const noTxAdapter = createAdapterFactory({
                   config: { ...adapterFactoryOptions.config, transaction: false },
                   adapter: createCustomAdapter(db),
-                } as unknown as Parameters<typeof createAdapterFactory>[0])(lazyOptions!);
+                })(lazyOptions!);
 
                 return callback(noTxAdapter);
               };
@@ -1094,7 +1093,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
                 const adapter = createAdapterFactory({
                   config: adapterFactoryOptions.config,
                   adapter: createCustomAdapter(transaction),
-                } as unknown as Parameters<typeof createAdapterFactory>[0])(lazyOptions!);
+                })(lazyOptions!);
 
                 try {
                   const result = await callback(adapter);
@@ -1120,7 +1119,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
             },
     },
     adapter: createCustomAdapter(db),
-  } as unknown as Parameters<typeof createAdapterFactory>[0];
+  };
 
   const baseFactory = createAdapterFactory(adapterFactoryOptions);
 
@@ -1136,13 +1135,13 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
 export interface GenerateSurqlSchemaOptions {
   file?: string;
   tables?: BetterAuthDBSchema;
-  getModelName: (modelName: string) => string;
-  getFieldName: (options: { field: string; model: string }) => string;
-}
-
-type InternalGenerateSurqlSchemaOptions = GenerateSurqlSchemaOptions & {
+  getModelName: AdapterFactoryHelpers["getModelName"];
+  getFieldName: AdapterFactoryHelpers["getFieldName"];
+  /**
+   * Internal/test-only option for optional SurrealDB DEFINE API generation.
+   */
   apiEndpoints?: boolean | SurrealApiEndpointsConfig;
-};
+}
 
 export interface ApplySurqlSchemaOptions {
   db: Surreal;
@@ -1176,8 +1175,7 @@ export const executeSurqlSchema = async (db: Surreal, code: string) => {
  * This function is decoupled from the adapter factory to allow direct testing.
  */
 export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) => {
-  const { file, tables, getModelName, getFieldName, apiEndpoints } =
-    options as InternalGenerateSurqlSchemaOptions;
+  const { file, tables, getModelName, getFieldName, apiEndpoints } = options;
   const code: string[] = [];
   const apiTableNames: string[] = [];
   const resolvedApiConfig =
