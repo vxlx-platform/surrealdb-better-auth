@@ -10,14 +10,17 @@ import {
   DateTime,
   type Expr,
   type ExprLike,
+  Features,
   InvalidSessionError,
   MissingNamespaceDatabaseError,
   RecordId,
   ServerError,
   StringRecordId,
+  type SurrealSession,
   type Surreal,
   SurrealError,
   Table,
+  UnsupportedFeatureError,
   Uuid,
   and,
   contains,
@@ -96,6 +99,16 @@ export interface SurrealAdapterConfig {
    * Or you can provide a function to control per-table behavior.
    */
   recordIdFormat?: RecordIdFormat | ((tableName: string) => RecordIdFormat);
+
+  /**
+   * Controls Better Auth transaction behavior for this adapter.
+   *
+   * - `"auto"` (default): use SurrealDB SDK session transactions when supported by
+   *   the connected engine; otherwise fallback to Better Auth's non-transaction path.
+   * - `true`: require session transactions. If unsupported, transaction calls throw.
+   * - `false`: always disable database-backed transactions.
+   */
+  transaction?: "auto" | boolean;
 }
 
 type InternalSurrealAdapterConfig = SurrealAdapterConfig & {
@@ -118,17 +131,9 @@ type SurrealQueryClient = {
   query<R extends unknown[] = unknown[]>(query: BoundQuery<R>): Promise<R>;
 };
 
-type SurrealTransactionClient = SurrealQueryClient & {
-  commit(): Promise<void>;
-  cancel(): Promise<void>;
-};
+type SurrealSessionClient = SurrealSession;
 
-type SurrealSessionClient = {
-  beginTransaction(): Promise<SurrealTransactionClient>;
-  closeSession(): Promise<void>;
-};
-
-type SurrealSessionCapableClient = SurrealQueryClient & {
+type SurrealSessionCapableClient = Surreal & {
   forkSession(): Promise<SurrealSessionClient>;
 };
 
@@ -171,6 +176,39 @@ const UUID_LITERAL_RE = /^u(['"])(.+)\1$/;
  */
 export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
   const internalConfig = config as InternalSurrealAdapterConfig | undefined;
+  const transactionMode = config?.transaction ?? "auto";
+
+  const isUnsupportedSessionsFeatureError = (error: unknown): boolean => {
+    if (error instanceof UnsupportedFeatureError) {
+      return true;
+    }
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      return message.includes("does not support the feature") && message.includes("sessions");
+    }
+    return false;
+  };
+
+  const hasForkSessionMethod =
+    "forkSession" in db && typeof (db as SurrealSessionCapableClient).forkSession === "function";
+
+  const detectTransactionFeatureSupport = (): boolean | null => {
+    if (typeof db.isFeatureSupported !== "function") {
+      return null;
+    }
+
+    try {
+      const supportsSessions = db.isFeatureSupported(Features.Sessions);
+      const supportsTransactions = db.isFeatureSupported(Features.Transactions);
+      return supportsSessions && supportsTransactions;
+    } catch {
+      return null;
+    }
+  };
+
+  const initialTransactionSupport = detectTransactionFeatureSupport();
+  let runtimeTransactionDisabled = transactionMode !== true && initialTransactionSupport === false;
+
   const adapterError = (message: string, cause?: unknown) => {
     const error = new Error(`[surrealdb-adapter] ${message}`);
     if (cause !== undefined) {
@@ -1026,9 +1064,43 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         return data;
       },
       transaction:
-        "forkSession" in db && typeof (db as SurrealSessionCapableClient).forkSession === "function"
-          ? async <R>(callback: (trx: any) => Promise<R>) => {
-              const session = await (db as SurrealSessionCapableClient).forkSession();
+        transactionMode === false ||
+        (transactionMode === "auto" && (!hasForkSessionMethod || initialTransactionSupport === false))
+          ? false
+          : async <R>(callback: (trx: any) => Promise<R>) => {
+              const runWithoutDatabaseTransaction = async () => {
+                const noTxAdapter = createAdapterFactory({
+                  config: { ...adapterFactoryOptions.config, transaction: false },
+                  adapter: createCustomAdapter(db),
+                } as unknown as Parameters<typeof createAdapterFactory>[0])(lazyOptions!);
+
+                return callback(noTxAdapter);
+              };
+
+              if (!hasForkSessionMethod) {
+                if (transactionMode === true) {
+                  throw adapterError(
+                    "Transactions were explicitly enabled, but this SurrealDB client does not expose forkSession().",
+                  );
+                }
+                return runWithoutDatabaseTransaction();
+              }
+
+              if (runtimeTransactionDisabled && transactionMode !== true) {
+                return runWithoutDatabaseTransaction();
+              }
+
+              let session: SurrealSessionClient | null = null;
+
+              try {
+                session = await (db as SurrealSessionCapableClient).forkSession();
+              } catch (error) {
+                if (isUnsupportedSessionsFeatureError(error) && transactionMode !== true) {
+                  runtimeTransactionDisabled = true;
+                  return runWithoutDatabaseTransaction();
+                }
+                throw adapterError("Failed to initialize a SurrealDB transaction session.", error);
+              }
 
               try {
                 const transaction = await session.beginTransaction();
@@ -1049,11 +1121,16 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
                   }
                   throw error;
                 }
+              } catch (error) {
+                if (isUnsupportedSessionsFeatureError(error) && transactionMode !== true) {
+                  runtimeTransactionDisabled = true;
+                  return runWithoutDatabaseTransaction();
+                }
+                throw error;
               } finally {
                 await session.closeSession();
               }
-            }
-          : false,
+            },
     },
     adapter: createCustomAdapter(db),
   } as unknown as Parameters<typeof createAdapterFactory>[0];

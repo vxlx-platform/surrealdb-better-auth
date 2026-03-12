@@ -134,6 +134,7 @@ const config: SurrealAdapterConfig = {
   usePlural: false,
   debugLogs: false,
   recordIdFormat: "native", // "native" | "ulid" | "uuidv7" | (tableName) => ...
+  transaction: "auto", // "auto" | true | false
 };
 
 const adapter = surrealAdapter(db, config);
@@ -157,6 +158,18 @@ surrealAdapter(db, {
     return "native";
   },
 });
+```
+
+### `transaction`
+
+Controls how the adapter handles Better Auth transaction hooks:
+
+- `"auto"` (default): use SDK session transactions when supported by the connected SurrealDB engine, otherwise fallback to Better Auth's non-transaction path.
+- `true`: require session transactions; throw if the engine does not support sessions/transactions.
+- `false`: always disable database-backed transactions.
+
+```ts
+surrealAdapter(db, { transaction: "auto" });
 ```
 
 ## ID / Reference Behavior
@@ -189,6 +202,8 @@ The adapter supports Better Auth's transaction hook using the SurrealDB JavaScri
 This is mainly used by Better Auth itself for multi-step database writes that should succeed or fail atomically.
 
 If a transaction callback throws, the adapter cancels the transaction and rethrows the original error.
+
+By default (`transaction: "auto"`), the adapter checks SDK feature support and uses session transactions only when the connected engine supports `Sessions` and `Transactions`. If those features are unavailable, it falls back internally to Better Auth's non-transaction execution path, so app code does not need client-level `forkSession` patching.
 
 ## Schema Generation
 
