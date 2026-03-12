@@ -41,9 +41,7 @@ export async function buildAdapter(
 
   const builtConfig = auth.options as BetterAuthOptions;
   const adapterFactory = builtConfig.database as DBAdapterInstance;
-  const adapter = adapterFactory({
-    plugins: builtConfig.plugins,
-  }) as DBAdapter;
+  const adapter = adapterFactory(builtConfig) as DBAdapter;
 
   return { db, auth, adapter, builtConfig };
 }
