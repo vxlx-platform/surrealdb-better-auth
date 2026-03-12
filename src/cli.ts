@@ -3,12 +3,16 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import type { BetterAuthOptions } from "better-auth";
+import type { Surreal } from "surrealdb";
+
 import { applySurqlSchema } from "./index.js";
 
 type MigrationModule = {
+  [key: string]: unknown;
   default?: unknown;
-  auth?: { options?: unknown };
-  db?: unknown;
+  auth?: { options: BetterAuthOptions };
+  db?: Surreal;
 };
 
 const printUsage = () => {
@@ -47,7 +51,7 @@ const parseArgs = (argv: string[]) => {
 };
 
 const resolveExport = <T>(mod: MigrationModule, key: string): T | undefined => {
-  const direct = mod[key as keyof MigrationModule] as T | undefined;
+  const direct = mod[key] as T | undefined;
   if (direct !== undefined) return direct;
 
   if (mod.default && typeof mod.default === "object") {
@@ -69,28 +73,26 @@ const main = async () => {
   const absoluteConfig = resolve(process.cwd(), config);
   const mod = (await import(pathToFileURL(absoluteConfig).href)) as MigrationModule;
 
-  const auth = resolveExport<{ options?: unknown }>(mod, authExport);
-  const db = resolveExport<{ close?: () => Promise<void> }>(mod, dbExport);
+  const auth = resolveExport<{ options: BetterAuthOptions }>(mod, authExport);
+  const db = resolveExport<Surreal>(mod, dbExport);
 
-  if (!auth?.options) {
+  if (!auth || typeof auth.options !== "object") {
     throw new Error(`Could not find a Better Auth instance export named "${authExport}".`);
   }
 
-  if (!db || typeof db !== "object") {
+  if (!db || typeof db.query !== "function") {
     throw new Error(`Could not find a Surreal client export named "${dbExport}".`);
   }
 
   const result = await applySurqlSchema({
-    db: db as never,
-    authOptions: auth.options as never,
+    db,
+    authOptions: auth.options,
     file,
   });
 
   console.log(`Applied SurrealDB schema${result.path ? ` (${result.path})` : ""}.`);
 
-  if (typeof db.close === "function") {
-    await db.close();
-  }
+  await db.close();
 };
 
 main().catch((error) => {
