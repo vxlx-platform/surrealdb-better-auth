@@ -4,7 +4,7 @@ import { emailOTP } from "better-auth/plugins";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
+import { setupIntegrationAdapter } from "../../test-utils";
 
 const _getAuthType = () =>
   betterAuth({
@@ -23,6 +23,8 @@ describe("Plugin - Email OTP", () => {
   let db: Surreal;
   let auth: AuthWithEmailOTP;
   let adapter: DBAdapter;
+  let resetDb: () => Promise<void>;
+  let closeDb: () => Promise<true>;
   const otpByKey = new Map<string, string>();
 
   const otpKey = (
@@ -31,7 +33,7 @@ describe("Plugin - Email OTP", () => {
   ) => `${type}:${email.toLowerCase()}`;
 
   beforeAll(async () => {
-    const built = await buildAdapter(
+    const built = await setupIntegrationAdapter(
       { debugLogs: false },
       {
         emailAndPassword: { enabled: true },
@@ -47,17 +49,17 @@ describe("Plugin - Email OTP", () => {
     db = built.db;
     auth = built.auth as unknown as AuthWithEmailOTP;
     adapter = built.adapter;
-
-    await ensureSchema(db, adapter, built.builtConfig);
+    resetDb = built.reset;
+    closeDb = built.close;
   }, 60_000);
 
   beforeEach(async () => {
     otpByKey.clear();
-    await truncateAuthTables(db);
+    await resetDb();
   });
 
   afterAll(async () => {
-    if (db) await db.close();
+    if (db) await closeDb();
   });
 
   it("signs in an existing user with a valid sign-in OTP", async () => {

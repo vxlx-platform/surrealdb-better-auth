@@ -1,3 +1,5 @@
+import { nextFixtureSuffix } from "./seed.fixture";
+
 export type SessionSeed = {
   token: string;
   userId: string;
@@ -8,15 +10,8 @@ export type SessionSeed = {
   userAgent?: string | null;
 };
 
-let sessionSeedCounter = 0;
-
-function nextSessionSuffix() {
-  sessionSeedCounter += 1;
-  return `${Date.now()}_${sessionSeedCounter}`;
-}
-
 export function makeSessionSeed(overrides?: Partial<SessionSeed>): SessionSeed {
-  const suffix = nextSessionSuffix();
+  const suffix = nextFixtureSuffix("session");
   const now = new Date();
 
   return {

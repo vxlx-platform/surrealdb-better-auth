@@ -1,3 +1,5 @@
+import { nextFixtureSuffix } from "./seed.fixture";
+
 export type AccountSeed = {
   accountId: string;
   providerId: string;
@@ -13,15 +15,8 @@ export type AccountSeed = {
   password?: string | null;
 };
 
-let accountSeedCounter = 0;
-
-function nextAccountSuffix() {
-  accountSeedCounter += 1;
-  return `${Date.now()}_${accountSeedCounter}`;
-}
-
 export function makeAccountSeed(overrides?: Partial<AccountSeed>): AccountSeed {
-  const suffix = nextAccountSuffix();
+  const suffix = nextFixtureSuffix("account");
   const now = new Date();
 
   return {

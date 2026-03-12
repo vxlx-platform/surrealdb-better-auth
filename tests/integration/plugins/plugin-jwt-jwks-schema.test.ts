@@ -6,9 +6,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import type { JWKSRow } from "../../types";
 import { getHttpApiBaseUrl, getSurrealHttpHeaders } from "../../__helpers__/env";
-import { expectOkJson } from "../../__helpers__/http";
+import { expectOkJson, fetchWithTimeout } from "../../__helpers__/http";
 import { type TestServerHandle, startTestServer } from "../../__helpers__/server";
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
+import { setupIntegrationAdapter } from "../../test-utils";
 
 describe("Plugin - JWT JWKS Schema", () => {
   let masterDb: Surreal;
@@ -17,10 +17,12 @@ describe("Plugin - JWT JWKS Schema", () => {
   let apiBaseUrl: string;
   let headers: Record<string, string>;
   let server: TestServerHandle;
+  let resetDb: () => Promise<void>;
+  let closeDb: () => Promise<true>;
 
   beforeAll(async () => {
     // Build the adapter with the exact JWT configuration
-    const built = await buildAdapter(
+    const built = await setupIntegrationAdapter(
       {
         debugLogs: false,
         apiEndpoints: true,
@@ -44,13 +46,13 @@ describe("Plugin - JWT JWKS Schema", () => {
     apiBaseUrl = getHttpApiBaseUrl();
     headers = getSurrealHttpHeaders();
 
-    // Ensure plugin-dependent tables (including jwks) exist for endpoint tests.
-    await ensureSchema(masterDb, adapter, authConfig);
+    resetDb = built.reset;
+    closeDb = built.close;
     server = await startTestServer();
   }, 60_000);
 
   beforeEach(async () => {
-    await truncateAuthTables(masterDb);
+    await resetDb();
     await masterDb.query("DELETE jwks").catch(() => {});
   });
 
@@ -59,7 +61,7 @@ describe("Plugin - JWT JWKS Schema", () => {
       await server.stop();
     }
     if (masterDb) {
-      await masterDb.close();
+      await closeDb();
     }
   });
 
@@ -81,9 +83,7 @@ describe("Plugin - JWT JWKS Schema", () => {
   });
 
   it("should return 200 and a valid JWKS response for the jwks endpoint", async () => {
-    const response = await fetch(`${server.baseUrl}/api/auth/.well-known`, {
-      signal: AbortSignal.timeout(5_000),
-    });
+    const response = await fetchWithTimeout(`${server.baseUrl}/api/auth/.well-known`);
 
     const jwks = (await expectOkJson(response, "Better Auth JWKS endpoint")) as { keys: any[] };
     expect(jwks.keys).toBeDefined();
@@ -92,9 +92,7 @@ describe("Plugin - JWT JWKS Schema", () => {
   });
 
   it("persists the generated JWKS key pair to the SurrealDB database", async () => {
-    const response = await fetch(`${server.baseUrl}/api/auth/.well-known`, {
-      signal: AbortSignal.timeout(5_000),
-    });
+    const response = await fetchWithTimeout(`${server.baseUrl}/api/auth/.well-known`);
 
     const jwks = (await expectOkJson(response, "Better Auth JWKS persistence trigger")) as {
       keys: any[];
@@ -118,21 +116,19 @@ describe("Plugin - JWT JWKS Schema", () => {
     expect(activeKey?.createdAt).toBeDefined();
 
     // Check that it's a valid string-based key
-    expect(typeof activeKey?.publicKey).toBe("string");
+    const publicKey = activeKey?.publicKey;
+    expect(typeof publicKey).toBe("string");
     expect(typeof activeKey?.privateKey).toBe("string");
-    expect((activeKey?.publicKey as string).length).toBeGreaterThan(100);
+    expect((publicKey as string).length).toBeGreaterThan(100);
   });
 
   it("serves the generated jwks table through the live SurrealDB HTTP API", async () => {
-    const response = await fetch(`${server.baseUrl}/api/auth/.well-known`, {
-      signal: AbortSignal.timeout(5_000),
-    });
+    const response = await fetchWithTimeout(`${server.baseUrl}/api/auth/.well-known`);
 
     await expectOkJson(response, "Better Auth JWKS generation before SurrealDB API read");
 
-    const apiResponse = await fetch(`${apiBaseUrl}/jwks`, {
+    const apiResponse = await fetchWithTimeout(`${apiBaseUrl}/jwks`, {
       headers,
-      signal: AbortSignal.timeout(5_000),
     });
 
     const body = (await expectOkJson(apiResponse, "SurrealDB /jwks endpoint")) as Array<

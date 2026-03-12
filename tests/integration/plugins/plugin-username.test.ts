@@ -4,7 +4,7 @@ import { username } from "better-auth/plugins";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
+import { setupIntegrationAdapter } from "../../test-utils";
 
 // 1. Create a dummy auth configuration purely for strict type inference.
 // We use 'as any' ONLY for the dummy database since it never runs.
@@ -25,9 +25,11 @@ describe("Plugin - Username", () => {
   // 3. Strongly type our test instance
   let auth: AuthWithUsername;
   let adapter: DBAdapter;
+  let resetDb: () => Promise<void>;
+  let closeDb: () => Promise<true>;
 
   beforeAll(async () => {
-    const built = await buildAdapter(
+    const built = await setupIntegrationAdapter(
       { debugLogs: false },
       {
         emailAndPassword: {
@@ -40,16 +42,16 @@ describe("Plugin - Username", () => {
     // 4. Safely cast the dynamically built auth to our strictly typed version
     auth = built.auth as unknown as AuthWithUsername;
     adapter = built.adapter;
-
-    await ensureSchema(db, adapter, built.builtConfig);
+    resetDb = built.reset;
+    closeDb = built.close;
   });
 
   beforeEach(async () => {
-    await truncateAuthTables(db);
+    await resetDb();
   });
 
   afterAll(async () => {
-    if (db) await db.close();
+    if (db) await closeDb();
   });
 
   it("signs up, saves username fields to the DB, and signs in successfully", async () => {

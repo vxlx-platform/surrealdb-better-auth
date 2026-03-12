@@ -1,3 +1,5 @@
+import { nextFixtureSuffix } from "./seed.fixture";
+
 export type UserSeed = {
   name: string;
   email: string;
@@ -6,15 +8,8 @@ export type UserSeed = {
   updatedAt: Date;
 };
 
-let seedCounter = 0;
-
-function nextSuffix() {
-  seedCounter += 1;
-  return `${Date.now()}_${seedCounter}`;
-}
-
 export function makeUserSeed(overrides?: Partial<UserSeed>): UserSeed {
-  const suffix = nextSuffix();
+  const suffix = nextFixtureSuffix("user");
   const now = new Date();
 
   return {

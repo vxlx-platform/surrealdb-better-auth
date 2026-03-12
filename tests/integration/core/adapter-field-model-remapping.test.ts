@@ -4,7 +4,7 @@ import { type Surreal, Table } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { truncateTables } from "../../__helpers__/db";
-import { buildAdapter, ensureSchema } from "../../test-utils";
+import { type BuiltTestAdapter, setupIntegrationAdapter } from "../../test-utils";
 
 const REMAPPED_AUTH_TABLES = [
   "app_session",
@@ -15,12 +15,13 @@ const REMAPPED_AUTH_TABLES = [
 
 describe("Adapter Core - Field/Model Remapping", () => {
   let db: Surreal;
-  let auth: Awaited<ReturnType<typeof buildAdapter>>["auth"];
+  let auth: BuiltTestAdapter["auth"];
   let adapter: DBAdapter;
   let builtConfig: BetterAuthOptions;
+  let closeDb: () => Promise<true>;
 
   beforeAll(async () => {
-    const built = await buildAdapter(
+    const built = await setupIntegrationAdapter(
       { debugLogs: false },
       {
         emailAndPassword: {
@@ -81,8 +82,7 @@ describe("Adapter Core - Field/Model Remapping", () => {
     auth = built.auth;
     adapter = built.adapter;
     builtConfig = built.builtConfig;
-
-    await ensureSchema(db, adapter, builtConfig);
+    closeDb = built.close;
   }, 60_000);
 
   beforeEach(async () => {
@@ -91,7 +91,7 @@ describe("Adapter Core - Field/Model Remapping", () => {
 
   afterAll(async () => {
     if (db) {
-      await db.close();
+      await closeDb();
     }
   });
 

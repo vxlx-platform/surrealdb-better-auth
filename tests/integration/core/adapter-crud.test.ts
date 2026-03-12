@@ -10,7 +10,7 @@ describe("Adapter Core - CRUD", () => {
   let db: Surreal;
   let adapter: DBAdapter;
   let resetDb: () => Promise<void>;
-  let closeDb: () => Promise<void>;
+  let closeDb: () => Promise<true>;
 
   beforeAll(async () => {
     const built = await setupIntegrationAdapter();

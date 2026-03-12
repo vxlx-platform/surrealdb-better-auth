@@ -1,7 +1,6 @@
-import type { Surreal } from "surrealdb";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
+import { setupIntegrationAdapter } from "../../test-utils";
 
 // Regex patterns for strict ID format validation
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -10,33 +9,38 @@ const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
 const RANDOM_ID_REGEX = /^[a-zA-Z0-9]+$/;
 
 describe("Adapter Core - Record ID Formats", () => {
-  let db: Surreal | undefined;
+  let closeDb: (() => Promise<true>) | undefined;
 
-  beforeEach(async () => {
-    // We handle truncation within the tests if db is initialized,
-    // but the tests build their own adapters so we will truncate after build.
-  });
+  const setupFormatCase = async (
+    recordIdFormat:
+      | "native"
+      | "ulid"
+      | "uuidv7"
+      | ((tableName: string) => "native" | "ulid" | "uuidv7"),
+  ) => {
+    const built = await setupIntegrationAdapter(
+      { recordIdFormat },
+      { emailAndPassword: { enabled: true } },
+    );
+    closeDb = built.close;
+    await built.reset();
+    return built;
+  };
 
   afterEach(async () => {
-    if (db) {
-      await db.close();
-      db = undefined;
+    if (closeDb) {
+      await closeDb();
     }
+    closeDb = undefined;
   });
 
   afterAll(async () => {
-    if (db) await db.close();
+    if (closeDb) await closeDb();
   });
 
   it("should create records with a UUIDv7 format", async () => {
-    const built = await buildAdapter(
-      { recordIdFormat: "uuidv7" },
-      { emailAndPassword: { enabled: true } },
-    );
-    db = built.db;
+    const built = await setupFormatCase("uuidv7");
     const auth = built.auth;
-    await ensureSchema(db, built.adapter, built.builtConfig);
-    await truncateAuthTables(db);
 
     const result = await auth.api.signUpEmail({
       body: {
@@ -60,14 +64,8 @@ describe("Adapter Core - Record ID Formats", () => {
   });
 
   it("should create records with a ULID format", async () => {
-    const built = await buildAdapter(
-      { recordIdFormat: "ulid" },
-      { emailAndPassword: { enabled: true } },
-    );
-    db = built.db;
+    const built = await setupFormatCase("ulid");
     const auth = built.auth;
-    await ensureSchema(db, built.adapter, built.builtConfig);
-    await truncateAuthTables(db);
 
     const result = await auth.api.signUpEmail({
       body: {
@@ -88,14 +86,8 @@ describe("Adapter Core - Record ID Formats", () => {
   });
 
   it("should create records with the default random format", async () => {
-    const built = await buildAdapter(
-      { recordIdFormat: "native" },
-      { emailAndPassword: { enabled: true } },
-    );
-    db = built.db;
+    const built = await setupFormatCase("native");
     const auth = built.auth;
-    await ensureSchema(db, built.adapter, built.builtConfig);
-    await truncateAuthTables(db);
 
     const result = await auth.api.signUpEmail({
       body: {
@@ -114,20 +106,12 @@ describe("Adapter Core - Record ID Formats", () => {
 
   it("should support table-specific format logic via a function", async () => {
     // We configure the adapter to use UUID for users, ULID for accounts, and random for everything else (sessions)
-    const built = await buildAdapter(
-      {
-        recordIdFormat: (tableName) => {
-          if (tableName === "user") return "uuidv7";
-          if (tableName === "account") return "ulid";
-          return "native";
-        },
-      },
-      { emailAndPassword: { enabled: true } },
-    );
-    db = built.db;
+    const built = await setupFormatCase((tableName) => {
+      if (tableName === "user") return "uuidv7";
+      if (tableName === "account") return "ulid";
+      return "native";
+    });
     const auth = built.auth;
-    await ensureSchema(db, built.adapter, built.builtConfig);
-    await truncateAuthTables(db);
 
     const result = await auth.api.signUpEmail({
       body: {
@@ -162,15 +146,14 @@ describe("Adapter Core - Record ID Formats", () => {
   });
 
   it("rejects unsupported record-id formats from a table-specific formatter", async () => {
-    const built = await buildAdapter(
+    const built = await setupIntegrationAdapter(
       {
         recordIdFormat: () => "uuidv4" as any,
       },
       { emailAndPassword: { enabled: true } },
     );
-    db = built.db;
-    await ensureSchema(db, built.adapter, built.builtConfig);
-    await truncateAuthTables(db);
+    closeDb = built.close;
+    await built.reset();
 
     await expect(
       built.adapter.create({

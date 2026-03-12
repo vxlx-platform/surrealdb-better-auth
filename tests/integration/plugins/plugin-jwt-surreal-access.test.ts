@@ -6,20 +6,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { executeSurqlSchema } from "../../../src";
 import { getScopedDbName, getTestDbEnv } from "../../__helpers__/env";
-import { expectOkJson } from "../../__helpers__/http";
+import { expectOkJson, fetchWithTimeout, getCookieHeader } from "../../__helpers__/http";
 import { type TestServerHandle, startTestServer } from "../../__helpers__/server";
-import { buildAdapter, ensureSchema } from "../../test-utils";
-
-const getCookieHeader = (response: Response) => {
-  const setCookies =
-    (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
-  if (setCookies.length > 0) {
-    return setCookies.map((cookie) => cookie.split(";")[0]!).join("; ");
-  }
-
-  const singleCookie = response.headers.get("set-cookie");
-  return singleCookie ? singleCookie.split(";")[0]! : "";
-};
+import { setupIntegrationAdapter } from "../../test-utils";
 
 const decodeJwtPayload = (token: string) => {
   const [, payload] = token.split(".");
@@ -39,6 +28,8 @@ describe("Plugin - JWT SurrealDB Access", () => {
   let namespace: string;
   let database: string;
   let jwksPath: string;
+  let resetDb: () => Promise<void>;
+  let closeDb: () => Promise<true>;
 
   beforeAll(async () => {
     accessName = `better_auth_user_${Date.now()}`;
@@ -48,7 +39,7 @@ describe("Plugin - JWT SurrealDB Access", () => {
 
     jwksPath = `/.well-known/jwks-${Date.now()}.json`;
 
-    const built = await buildAdapter(
+    const built = await setupIntegrationAdapter(
       {
         debugLogs: false,
         apiEndpoints: true,
@@ -80,7 +71,8 @@ describe("Plugin - JWT SurrealDB Access", () => {
     adapter = built.adapter;
     authConfig = built.builtConfig;
 
-    await ensureSchema(masterDb, adapter, authConfig);
+    resetDb = built.reset;
+    closeDb = built.close;
 
     server = await startTestServer({
       port: 3003,
@@ -104,10 +96,7 @@ DEFINE ACCESS OVERWRITE ${accessName}
   }, 60_000);
 
   beforeEach(async () => {
-    const authTables = ["session", "account", "verification", "user"] as const;
-    for (const table of authTables) {
-      await masterDb.query(`DELETE ${table}`).catch(() => {});
-    }
+    await resetDb();
     await masterDb.query(`REMOVE ACCESS ${accessName} ON DATABASE`).catch(() => {});
 
     const jwksUrl = `${server.baseUrl}/api/auth${jwksPath}`;
@@ -127,7 +116,7 @@ DEFINE ACCESS OVERWRITE ${accessName}
       await server.stop();
     }
     if (masterDb) {
-      await masterDb.close();
+      await closeDb();
     }
   });
 
@@ -139,7 +128,7 @@ DEFINE ACCESS OVERWRITE ${accessName}
   });
 
   it("authenticates a SurrealDB client with a Better Auth JWT via JWKS URL", async () => {
-    const signUpResponse = await fetch(`${server.baseUrl}/api/auth/sign-up/email`, {
+    const signUpResponse = await fetchWithTimeout(`${server.baseUrl}/api/auth/sign-up/email`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -150,7 +139,6 @@ DEFINE ACCESS OVERWRITE ${accessName}
         email: `jwt-access-${Date.now()}@example.com`,
         password: "jwt-access-password-123",
       }),
-      signal: AbortSignal.timeout(5_000),
     });
 
     const signUp = (await expectOkJson(signUpResponse, "Better Auth sign-up for JWT access")) as {
@@ -160,12 +148,11 @@ DEFINE ACCESS OVERWRITE ${accessName}
     const cookieHeader = getCookieHeader(signUpResponse);
     expect(cookieHeader).not.toBe("");
 
-    const tokenResponse = await fetch(`${server.baseUrl}/api/auth/token`, {
+    const tokenResponse = await fetchWithTimeout(`${server.baseUrl}/api/auth/token`, {
       headers: {
         cookie: cookieHeader,
         origin: server.baseUrl,
       },
-      signal: AbortSignal.timeout(5_000),
     });
 
     const { token } = (await expectOkJson(tokenResponse, "Better Auth token endpoint")) as {

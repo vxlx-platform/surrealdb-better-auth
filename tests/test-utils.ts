@@ -60,7 +60,10 @@ export async function setupIntegrationAdapter(
   return {
     ...built,
     reset: async () => truncateAuthTables(built.db),
-    close: async () => built.db.close(),
+    close: async () => {
+      await built.db.close();
+      return true as const;
+    },
   };
 }
 

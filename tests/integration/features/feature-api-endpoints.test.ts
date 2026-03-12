@@ -1,42 +1,42 @@
 import type { DBAdapter } from "@better-auth/core/db/adapter";
-import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { getHttpApiBaseUrl, getSurrealHttpHeaders } from "../../__helpers__/env";
-import { expectOkJson } from "../../__helpers__/http";
+import { expectOkJson, fetchWithTimeout } from "../../__helpers__/http";
 import { type TestServerHandle, startTestServer } from "../../__helpers__/server";
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
+import { setupIntegrationAdapter } from "../../test-utils";
 
 describe("Feature - Generated DEFINE API Endpoints", () => {
-  let db: Surreal;
   let adapter: DBAdapter;
   let apiBaseUrl: string;
   let headers: Record<string, string>;
   let server: TestServerHandle;
+  let resetDb: () => Promise<void>;
+  let closeDb: () => Promise<true>;
 
   beforeAll(async () => {
-    const built = await buildAdapter({
+    const built = await setupIntegrationAdapter({
       apiEndpoints: true,
     });
 
-    db = built.db;
     adapter = built.adapter;
     apiBaseUrl = getHttpApiBaseUrl();
     headers = getSurrealHttpHeaders();
+    resetDb = built.reset;
+    closeDb = built.close;
 
-    await ensureSchema(db, adapter, built.builtConfig);
     server = await startTestServer();
   });
 
   beforeEach(async () => {
-    await truncateAuthTables(db);
+    await resetDb();
   });
 
   afterAll(async () => {
     if (server) {
       await server.stop();
     }
-    await db.close();
+    await closeDb();
   });
 
   it("serves the default /user endpoint from the live SurrealDB HTTP API", async () => {
@@ -51,27 +51,23 @@ describe("Feature - Generated DEFINE API Endpoints", () => {
       },
     });
 
-    const response = await fetch(`${apiBaseUrl}/user`, {
+    const response = await fetchWithTimeout(`${apiBaseUrl}/user`, {
       headers,
-      signal: AbortSignal.timeout(5_000),
     });
 
-    const body = (await expectOkJson(
-      response,
-      "SurrealDB default /user endpoint",
-    )) as Array<Record<string, unknown>>;
+    const body = (await expectOkJson(response, "SurrealDB default /user endpoint")) as Array<
+      Record<string, unknown>
+    >;
     expect(Array.isArray(body)).toBe(true);
     expect(body.some((row) => row.email === "api-user@example.com")).toBe(true);
   });
 
   it("serves a custom basePath endpoint from the live SurrealDB HTTP API", async () => {
-    const built = await buildAdapter({
+    const built = await setupIntegrationAdapter({
       apiEndpoints: {
         basePath: "/better-auth",
       },
     });
-
-    await ensureSchema(built.db, built.adapter, built.builtConfig);
 
     await built.adapter.create({
       model: "user",
@@ -84,9 +80,8 @@ describe("Feature - Generated DEFINE API Endpoints", () => {
       },
     });
 
-    const response = await fetch(`${apiBaseUrl}/better-auth/user`, {
+    const response = await fetchWithTimeout(`${apiBaseUrl}/better-auth/user`, {
       headers,
-      signal: AbortSignal.timeout(5_000),
     });
 
     const body = (await expectOkJson(
@@ -96,6 +91,6 @@ describe("Feature - Generated DEFINE API Endpoints", () => {
     expect(Array.isArray(body)).toBe(true);
     expect(body.some((row) => row.email === "prefixed-api-user@example.com")).toBe(true);
 
-    await built.db.close();
+    await built.close();
   });
 });

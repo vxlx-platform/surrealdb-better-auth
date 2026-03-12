@@ -5,7 +5,7 @@ import { adminAc, userAc } from "better-auth/plugins/admin/access";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
+import { type BuiltTestAdapter, setupIntegrationAdapter } from "../../test-utils";
 
 const _getAuthType = () =>
   betterAuth({
@@ -31,10 +31,12 @@ describe("Plugin - Admin", () => {
   let db: Surreal;
   let auth: AuthWithAdmin;
   let adapter: DBAdapter;
-  let builtConfig: Awaited<ReturnType<typeof buildAdapter>>["builtConfig"];
+  let builtConfig: BuiltTestAdapter["builtConfig"];
+  let resetDb: () => Promise<void>;
+  let closeDb: () => Promise<true>;
 
   beforeAll(async () => {
-    const built = await buildAdapter(
+    const built = await setupIntegrationAdapter(
       { debugLogs: false },
       {
         baseURL: "http://localhost",
@@ -58,16 +60,16 @@ describe("Plugin - Admin", () => {
     auth = built.auth as unknown as AuthWithAdmin;
     adapter = built.adapter;
     builtConfig = built.builtConfig;
-
-    await ensureSchema(db, adapter, builtConfig);
+    resetDb = built.reset;
+    closeDb = built.close;
   }, 60_000);
 
   beforeEach(async () => {
-    await truncateAuthTables(db);
+    await resetDb();
   });
 
   afterAll(async () => {
-    if (db) await db.close();
+    if (db) await closeDb();
   });
 
   async function createAdminSessionHeaders() {

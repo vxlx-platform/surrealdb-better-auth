@@ -1,3 +1,5 @@
+import { nextFixtureSuffix } from "./seed.fixture";
+
 export type VerificationSeed = {
   identifier: string;
   value: string;
@@ -6,15 +8,8 @@ export type VerificationSeed = {
   updatedAt: Date;
 };
 
-let verificationSeedCounter = 0;
-
-function nextVerificationSuffix() {
-  verificationSeedCounter += 1;
-  return `${Date.now()}_${verificationSeedCounter}`;
-}
-
 export function makeVerificationSeed(overrides?: Partial<VerificationSeed>): VerificationSeed {
-  const suffix = nextVerificationSuffix();
+  const suffix = nextFixtureSuffix("verification");
   const now = new Date();
 
   return {

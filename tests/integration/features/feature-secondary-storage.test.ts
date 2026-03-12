@@ -3,7 +3,7 @@ import type { BetterAuthOptions } from "better-auth";
 import { type Surreal, Table } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
+import { type BuiltTestAdapter, setupIntegrationAdapter } from "../../test-utils";
 
 type CacheEntry = {
   value: string;
@@ -46,13 +46,15 @@ const createInMemorySecondaryStorage = () => {
 
 describe("Feature - Secondary Storage Sessions", () => {
   let db: Surreal;
-  let auth: Awaited<ReturnType<typeof buildAdapter>>["auth"];
+  let auth: BuiltTestAdapter["auth"];
   let adapter: DBAdapter;
   let builtConfig: BetterAuthOptions;
+  let resetDb: () => Promise<void>;
+  let closeDb: () => Promise<true>;
   const secondaryStorage = createInMemorySecondaryStorage();
 
   beforeAll(async () => {
-    const built = await buildAdapter(
+    const built = await setupIntegrationAdapter(
       { debugLogs: false },
       {
         baseURL: "http://localhost",
@@ -70,23 +72,23 @@ describe("Feature - Secondary Storage Sessions", () => {
     auth = built.auth;
     adapter = built.adapter;
     builtConfig = built.builtConfig;
+    resetDb = built.reset;
+    closeDb = built.close;
 
     const schema = await adapter.createSchema!(builtConfig, "secondary-storage.surql");
     expect(schema.code).not.toContain("DEFINE TABLE session SCHEMAFULL;");
     expect(schema.code).toContain("DEFINE TABLE user SCHEMAFULL;");
     expect(schema.code).toContain("DEFINE TABLE account SCHEMAFULL;");
-
-    await ensureSchema(db, adapter, builtConfig);
   }, 60_000);
 
   beforeEach(async () => {
     secondaryStorage.clear();
-    await truncateAuthTables(db);
+    await resetDb();
   });
 
   afterAll(async () => {
     if (db) {
-      await db.close();
+      await closeDb();
     }
   });
 
