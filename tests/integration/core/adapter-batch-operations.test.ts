@@ -4,26 +4,28 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { makeAccountSeed } from "../../fixtures/account.fixture";
 import { makeSessionSeed } from "../../fixtures/session.fixture";
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
+import { setupIntegrationAdapter } from "../../test-utils";
 
 describe("Adapter Core - Batch Operations (updateMany/deleteMany)", () => {
   let db: Surreal;
   let adapter: DBAdapter;
+  let resetDb: () => Promise<void>;
+  let closeDb: () => Promise<void>;
 
   beforeAll(async () => {
-    // Initialize the raw adapter for database-level CRUD testing
-    const built = await buildAdapter();
+    const built = await setupIntegrationAdapter();
     db = built.db;
     adapter = built.adapter;
-    await ensureSchema(db, adapter, built.builtConfig);
+    resetDb = built.reset;
+    closeDb = built.close;
   });
 
   beforeEach(async () => {
-    await truncateAuthTables(db);
+    await resetDb();
   });
 
   afterAll(async () => {
-    if (db) await db.close();
+    if (db) await closeDb();
   });
 
   describe("updateMany", () => {

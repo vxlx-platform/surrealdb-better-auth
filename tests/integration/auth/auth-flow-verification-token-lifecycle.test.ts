@@ -3,22 +3,30 @@ import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { makeResetPasswordIdentifier } from "../../fixtures/verification.fixture";
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
+import { type BuiltTestAdapter, setupIntegrationAdapter } from "../../test-utils";
 
 describe("Auth Flow - Verification Token Lifecycle", () => {
   let db: Surreal;
-  let auth: Awaited<ReturnType<typeof buildAdapter>>["auth"];
+  let auth: BuiltTestAdapter["auth"];
   let adapter: DBAdapter;
+  let resetDb: () => Promise<void>;
+  let closeDb: () => Promise<true>;
   const resetTokens = new Map<string, string>();
 
   beforeAll(async () => {
-    const built = await buildAdapter(
+    const built = await setupIntegrationAdapter(
       { debugLogs: false },
       {
         baseURL: "http://localhost",
         emailAndPassword: {
           enabled: true,
-          sendResetPassword: async ({ user, token }: { user: { email: string }; token: string }) => {
+          sendResetPassword: async ({
+            user,
+            token,
+          }: {
+            user: { email: string };
+            token: string;
+          }) => {
             resetTokens.set(user.email.toLowerCase(), token);
           },
         },
@@ -28,18 +36,18 @@ describe("Auth Flow - Verification Token Lifecycle", () => {
     db = built.db;
     auth = built.auth;
     adapter = built.adapter;
-
-    await ensureSchema(db, adapter, built.builtConfig);
+    resetDb = built.reset;
+    closeDb = built.close;
   }, 60_000);
 
   beforeEach(async () => {
     resetTokens.clear();
-    await truncateAuthTables(db);
+    await resetDb();
   });
 
   afterAll(async () => {
     if (db) {
-      await db.close();
+      await closeDb();
     }
   });
 

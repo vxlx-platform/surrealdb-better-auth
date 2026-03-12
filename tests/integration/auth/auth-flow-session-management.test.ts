@@ -2,7 +2,7 @@ import type { DBAdapter } from "@better-auth/core/db/adapter";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
+import { type BuiltTestAdapter, setupIntegrationAdapter } from "../../test-utils";
 
 type TestSession = {
   headers: Headers;
@@ -11,11 +11,13 @@ type TestSession = {
 
 describe("Auth Flow - Session Management", () => {
   let db: Surreal;
-  let auth: Awaited<ReturnType<typeof buildAdapter>>["auth"];
+  let auth: BuiltTestAdapter["auth"];
   let adapter: DBAdapter;
+  let resetDb: () => Promise<void>;
+  let closeDb: () => Promise<true>;
 
   beforeAll(async () => {
-    const built = await buildAdapter(
+    const built = await setupIntegrationAdapter(
       { debugLogs: false },
       {
         emailAndPassword: {
@@ -27,17 +29,17 @@ describe("Auth Flow - Session Management", () => {
     db = built.db;
     auth = built.auth;
     adapter = built.adapter;
-
-    await ensureSchema(db, adapter, built.builtConfig);
+    resetDb = built.reset;
+    closeDb = built.close;
   }, 60_000);
 
   beforeEach(async () => {
-    await truncateAuthTables(db);
+    await resetDb();
   });
 
   afterAll(async () => {
     if (db) {
-      await db.close();
+      await closeDb();
     }
   });
 

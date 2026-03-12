@@ -4,25 +4,28 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import type { UserRow } from "../../types";
 import { makeUserSeed } from "../../fixtures/user.fixture";
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
+import { setupIntegrationAdapter } from "../../test-utils";
 
 describe("Adapter Core - CRUD", () => {
   let db: Surreal;
   let adapter: DBAdapter;
+  let resetDb: () => Promise<void>;
+  let closeDb: () => Promise<void>;
 
   beforeAll(async () => {
-    const built = await buildAdapter();
+    const built = await setupIntegrationAdapter();
     db = built.db;
     adapter = built.adapter;
-    await ensureSchema(db, adapter, built.builtConfig);
+    resetDb = built.reset;
+    closeDb = built.close;
   });
 
   beforeEach(async () => {
-    await truncateAuthTables(db);
+    await resetDb();
   });
 
   afterAll(async () => {
-    if (db) await db.close();
+    if (db) await closeDb();
   });
 
   it("creates a user record and returns a normalized id", async () => {

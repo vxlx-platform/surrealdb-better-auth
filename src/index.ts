@@ -152,6 +152,27 @@ const RECORD_ID_SUFFIX_RE = /:(?:⟨([^⟩]+)⟩|([^⟩:]+))$/;
  */
 const UUID_LITERAL_RE = /^u(['"])(.+)\1$/;
 
+const SUPPORTED_OPERATORS = new Set([
+  "eq",
+  "ne",
+  "lt",
+  "lte",
+  "gt",
+  "gte",
+  "contains",
+  "in",
+  "starts_with",
+  "ends_with",
+]);
+
+const FIELD_COERCION_RE = /Couldn't coerce value for field `([^`]+)`/i;
+const UNIQUE_CONSTRAINT_RE = /unique|duplicate/i;
+
+type QueryErrorClassification =
+  | { kind: "field"; field: string }
+  | { kind: "unique" }
+  | { kind: "none" };
+
 /**
  * Creates a Better Auth database adapter backed by SurrealDB.
  *
@@ -530,6 +551,32 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
       const customExpr = (sqlFactory: (ctx: { def: (value: unknown) => string }) => string): Expr =>
         ({ toSQL: sqlFactory }) as Expr;
 
+      const classifyQueryError = (error: unknown): QueryErrorClassification => {
+        const message = error instanceof Error ? error.message : String(error);
+
+        if (error instanceof ServerError) {
+          const fieldCoercionMatch = error.message.match(FIELD_COERCION_RE);
+          if (fieldCoercionMatch) {
+            return { kind: "field", field: fieldCoercionMatch[1]! };
+          }
+
+          if (error.kind === "AlreadyExists" || UNIQUE_CONSTRAINT_RE.test(error.message)) {
+            return { kind: "unique" };
+          }
+        }
+
+        const fieldCoercionMatch = message.match(FIELD_COERCION_RE);
+        if (fieldCoercionMatch) {
+          return { kind: "field", field: fieldCoercionMatch[1]! };
+        }
+
+        if (UNIQUE_CONSTRAINT_RE.test(message)) {
+          return { kind: "unique" };
+        }
+
+        return { kind: "none" };
+      };
+
       const wrapQueryError = (error: unknown, context: string): never => {
         const message = error instanceof Error ? error.message : String(error);
 
@@ -554,66 +601,31 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           );
         }
 
-        if (error instanceof ServerError) {
-          const fieldCoercionMatch = error.message.match(
-            /Couldn't coerce value for field `([^`]+)`/i,
+        const classification = classifyQueryError(error);
+        if (classification.kind === "field") {
+          throw adapterError(
+            `Invalid value for field "${classification.field}" while ${context}.`,
+            error,
           );
-          if (fieldCoercionMatch) {
-            throw adapterError(
-              `Invalid value for field "${fieldCoercionMatch[1]}" while ${context}.`,
-              error,
-            );
-          }
+        }
 
-          if (
-            error.kind === "AlreadyExists" ||
-            /unique/i.test(error.message) ||
-            /duplicate/i.test(error.message)
-          ) {
-            throw adapterError(`Unique constraint violation while ${context}.`, error);
-          }
+        if (classification.kind === "unique") {
+          throw adapterError(`Unique constraint violation while ${context}.`, error);
         }
 
         if (error instanceof SurrealError) {
           throw adapterError(`SurrealDB error while ${context}: ${error.message}`, error);
         }
 
-        const fieldCoercionMatch = message.match(/Couldn't coerce value for field `([^`]+)`/i);
-
-        if (fieldCoercionMatch) {
-          throw adapterError(
-            `Invalid value for field "${fieldCoercionMatch[1]}" while ${context}.`,
-            error,
-          );
-        }
-
-        if (/unique/i.test(message) || /duplicate/i.test(message)) {
-          throw adapterError(`Unique constraint violation while ${context}.`, error);
-        }
-
         throw adapterError(`SurrealDB query failed while ${context}: ${message}`, error);
       };
-
-      const isSupportedOperator = (operator: string) =>
-        [
-          "eq",
-          "ne",
-          "lt",
-          "lte",
-          "gt",
-          "gte",
-          "contains",
-          "in",
-          "starts_with",
-          "ends_with",
-        ].includes(operator);
 
       const buildCondition = (model: string, where: Where): ExprLike => {
         const { dbFieldName: fieldName, fieldAttributes } = resolveFieldContext(model, where.field);
         const operator = (where.operator ?? "eq").toLowerCase();
         let value: unknown = where.value;
 
-        if (!isSupportedOperator(operator)) {
+        if (!SUPPORTED_OPERATORS.has(operator)) {
           throw adapterError(
             `Unsupported operator "${operator}" for field "${where.field}" on model "${model}".`,
           );
@@ -709,6 +721,18 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         return new BoundQuery(sqlForTarget, { target });
       };
 
+      const prepareTargetQuery = (
+        model: string,
+        where: Where[] | undefined,
+        sqlForTable: (tableName: string) => string,
+        sqlForTarget: string,
+      ): { tableName: string; query: BoundQuery; rest: Where[] } => {
+        const tableName = resolveModelName(model);
+        const { target, rest } = splitIdWhere(tableName, where);
+        const query = makeTargetQuery(sqlForTable, sqlForTarget, tableName, target);
+        return { tableName, query, rest };
+      };
+
       const queryMany = async <T>(query: BoundQuery, context = "reading records"): Promise<T[]> => {
         try {
           const [rows] = await executeQuery<QueryResultRows<T>>(client, query);
@@ -746,14 +770,11 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         options: config,
 
         count: async ({ model, where }: { model: string; where?: Where[] }): Promise<number> => {
-          const tableName = resolveModelName(model);
-          const { target, rest } = splitIdWhere(tableName, where);
-
-          const query = makeTargetQuery(
+          const { tableName, query, rest } = prepareTargetQuery(
+            model,
+            where,
             (tb) => `SELECT count() AS count FROM ${escapeIdent(tb)}`,
             "SELECT count() AS count FROM $target",
-            tableName,
-            target,
           );
 
           appendWhere(query, tableName, rest);
@@ -811,14 +832,11 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           model: string;
           where: Where[];
         }): Promise<T | null> => {
-          const tableName = resolveModelName(model);
-          const { target, rest } = splitIdWhere(tableName, where);
-
-          const query = makeTargetQuery(
+          const { tableName, query, rest } = prepareTargetQuery(
+            model,
+            where,
             (tb) => `SELECT * FROM ${escapeIdent(tb)}`,
             "SELECT * FROM $target",
-            tableName,
-            target,
           );
 
           appendWhere(query, tableName, rest);
@@ -840,14 +858,11 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           offset?: number;
           sortBy?: { field: string; direction: "asc" | "desc" };
         }): Promise<T[]> => {
-          const tableName = resolveModelName(model);
-          const { target, rest } = splitIdWhere(tableName, where);
-
-          const query = makeTargetQuery(
+          const { tableName, query, rest } = prepareTargetQuery(
+            model,
+            where,
             (tb) => `SELECT * FROM ${escapeIdent(tb)}`,
             "SELECT * FROM $target",
-            tableName,
-            target,
           );
 
           appendWhere(query, tableName, rest);
@@ -878,18 +893,15 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           where: Where[];
           update: T;
         }): Promise<T | null> => {
-          const tableName = resolveModelName(model);
-          const { target, rest = [] } = splitIdWhere(tableName, where);
+          const { tableName, query, rest } = prepareTargetQuery(
+            model,
+            where,
+            (tb) => `UPDATE ${escapeIdent(tb)}`,
+            "UPDATE $target",
+          );
           const payload = update as Record<string, unknown>;
           assertWritePayload(model, payload);
           const patch = normalizeNullToNone(stripIdFromPayload(payload));
-
-          const query = makeTargetQuery(
-            (tb) => `UPDATE ${escapeIdent(tb)}`,
-            "UPDATE $target",
-            tableName,
-            target,
-          );
 
           query.append(surql` MERGE ${patch}`);
           appendWhere(query, tableName, rest);
@@ -907,17 +919,14 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           update: Record<string, unknown>;
           where: Where[];
         }): Promise<number> => {
-          const tableName = resolveModelName(model);
-          const { target, rest } = splitIdWhere(tableName, where);
-          assertWritePayload(model, update);
-          const patch = normalizeNullToNone(stripIdFromPayload(update));
-
-          const query = makeTargetQuery(
+          const { tableName, query, rest } = prepareTargetQuery(
+            model,
+            where,
             (tb) => `RETURN array::len((UPDATE ${escapeIdent(tb)}`,
             "RETURN array::len((UPDATE $target",
-            tableName,
-            target,
           );
+          assertWritePayload(model, update);
+          const patch = normalizeNullToNone(stripIdFromPayload(update));
 
           query.append(surql` MERGE ${patch}`);
           appendWhere(query, tableName, rest);
@@ -927,14 +936,11 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         },
 
         delete: async ({ model, where }: { model: string; where: Where[] }): Promise<void> => {
-          const tableName = resolveModelName(model);
-          const { target, rest } = splitIdWhere(tableName, where);
-
-          const query = makeTargetQuery(
+          const { tableName, query, rest } = prepareTargetQuery(
+            model,
+            where,
             (tb) => `DELETE ${escapeIdent(tb)}`,
             "DELETE $target",
-            tableName,
-            target,
           );
 
           appendWhere(query, tableName, rest);
@@ -952,14 +958,11 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
           model: string;
           where: Where[];
         }): Promise<number> => {
-          const tableName = resolveModelName(model);
-          const { target, rest } = splitIdWhere(tableName, where);
-
-          const query = makeTargetQuery(
+          const { tableName, query, rest } = prepareTargetQuery(
+            model,
+            where,
             (tb) => `RETURN array::len((DELETE ${escapeIdent(tb)}`,
             "RETURN array::len((DELETE $target",
-            tableName,
-            target,
           );
 
           appendWhere(query, tableName, rest);

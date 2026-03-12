@@ -23,8 +23,12 @@ type TestOnlyAdapterConfig = SurrealAdapterConfig & {
   apiEndpoints?: boolean | { basePath?: string; models?: string[] };
 };
 
+export type BuildAdapterOptions = TestOnlyAdapterConfig;
+
+export type BuiltTestAdapter = Awaited<ReturnType<typeof buildAdapter>>;
+
 export async function buildAdapter(
-  options?: TestOnlyAdapterConfig,
+  options?: BuildAdapterOptions,
   authOptions?: Partial<BetterAuthOptions>,
 ) {
   const { db } = await createTestDb();
@@ -44,6 +48,20 @@ export async function buildAdapter(
   const adapter = adapterFactory(builtConfig) as DBAdapter;
 
   return { db, auth, adapter, builtConfig };
+}
+
+export async function setupIntegrationAdapter(
+  options?: BuildAdapterOptions,
+  authOptions?: Partial<BetterAuthOptions>,
+) {
+  const built = await buildAdapter(options, authOptions);
+  await ensureSchema(built.db, built.adapter, built.builtConfig);
+
+  return {
+    ...built,
+    reset: async () => truncateAuthTables(built.db),
+    close: async () => built.db.close(),
+  };
 }
 
 export async function ensureSchema(

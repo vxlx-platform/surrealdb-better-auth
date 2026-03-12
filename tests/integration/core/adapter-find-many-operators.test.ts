@@ -2,22 +2,24 @@ import type { DBAdapter } from "@better-auth/core/db/adapter";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
+import { setupIntegrationAdapter } from "../../test-utils";
 
 describe("Adapter Core - findMany Pagination/Sorting/Filtering", () => {
   let db: Surreal;
   let adapter: DBAdapter;
+  let resetDb: () => Promise<void>;
+  let closeDb: () => Promise<true>;
 
   beforeAll(async () => {
-    // We only need the raw adapter for this, no plugins required
-    const built = await buildAdapter();
+    const built = await setupIntegrationAdapter();
     db = built.db;
     adapter = built.adapter;
-    await ensureSchema(db, adapter, built.builtConfig);
+    resetDb = built.reset;
+    closeDb = built.close;
   });
 
   beforeEach(async () => {
-    await truncateAuthTables(db);
+    await resetDb();
 
     // Seed the database with 5 predictable records
     const users = [
@@ -37,7 +39,7 @@ describe("Adapter Core - findMany Pagination/Sorting/Filtering", () => {
   });
 
   afterAll(async () => {
-    if (db) await db.close();
+    if (db) await closeDb();
   });
 
   it("applies a strict limit to the result set", async () => {
@@ -164,13 +166,7 @@ describe("Adapter Core - findMany Pagination/Sorting/Filtering", () => {
     });
 
     expect(results).toHaveLength(5);
-    expect(results.map((user) => user.name)).toEqual([
-      "Alice",
-      "Bob",
-      "Charlie",
-      "Diana",
-      "Eve",
-    ]);
+    expect(results.map((user) => user.name)).toEqual(["Alice", "Bob", "Charlie", "Diana", "Eve"]);
   });
 
   it("handles OR connector behavior explicitly", async () => {
