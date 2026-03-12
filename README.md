@@ -203,7 +203,19 @@ This is mainly used by Better Auth itself for multi-step database writes that sh
 
 If a transaction callback throws, the adapter cancels the transaction and rethrows the original error.
 
-By default (`transaction: "auto"`), the adapter checks SDK feature support and uses session transactions only when the connected engine supports `Sessions` and `Transactions`. If those features are unavailable, it falls back internally to Better Auth's non-transaction execution path, so app code does not need client-level `forkSession` patching.
+### Why unsupported engines can happen
+
+SurrealDB transactions are a core feature, but runtime support can still vary by engine/protocol/version/deployment configuration. In practice, a client can expose transaction methods while the active connection rejects session-backed transaction use.
+
+### How this adapter handles it
+
+By default (`transaction: "auto"`), the adapter checks SDK feature support first:
+
+```ts
+db.isFeatureSupported(Features.Sessions) && db.isFeatureSupported(Features.Transactions);
+```
+
+If those features are not available, it falls back internally to Better Auth's non-transaction execution path. It also keeps runtime guards around transaction startup to handle engines that still throw `UnsupportedFeatureError` at call time.
 
 ## Schema Generation
 

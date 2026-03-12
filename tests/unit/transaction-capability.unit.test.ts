@@ -1,7 +1,7 @@
 import type { DBAdapter, DBAdapterInstance } from "@better-auth/core/db/adapter";
 import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { describe, expect, it, vi } from "vitest";
-import { Features, type Surreal, UnsupportedFeatureError } from "surrealdb";
+import { Features, Surreal, UnsupportedFeatureError } from "surrealdb";
 
 import { type SurrealAdapterConfig, surrealAdapter } from "../../src";
 

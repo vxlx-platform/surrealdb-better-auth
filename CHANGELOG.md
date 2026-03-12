@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-12
+
 ### Added
 
 - Added a `transaction` adapter option (`"auto"` | `true` | `false`) to control transaction behavior explicitly.
@@ -16,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Transaction handling now performs SDK feature-aware detection (`Sessions` + `Transactions`) in auto mode and falls back internally when unsupported, removing the need for app-level `forkSession` normalization workarounds.
 - Hardened integration test server startup by adding child-process failure diagnostics, safer port selection, and retry behavior to reduce flaky health-check timeouts.
+- Replaced adapter-internal structural typing with SDK and Better Auth exported types in transaction/query/adapter factory paths, removing unsafe type casts.
 
 ## [0.4.0] - 2026-03-11
 
