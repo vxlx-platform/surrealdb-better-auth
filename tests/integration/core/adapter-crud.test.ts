@@ -3,7 +3,7 @@ import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import type { UserRow } from "../../types";
-import { makeUserSeed } from "../../__helpers__/factory";
+import { makeUserSeed } from "../../fixtures/user.fixture";
 import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
 
 describe("Adapter Core - CRUD", () => {

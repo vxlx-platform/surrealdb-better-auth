@@ -1,4 +1,4 @@
-type UserSeed = {
+export type UserSeed = {
   name: string;
   email: string;
   emailVerified: boolean;
@@ -26,4 +26,3 @@ export function makeUserSeed(overrides?: Partial<UserSeed>): UserSeed {
     ...overrides,
   };
 }
-

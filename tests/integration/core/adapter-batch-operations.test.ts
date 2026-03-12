@@ -2,6 +2,8 @@ import type { DBAdapter } from "@better-auth/core/db/adapter";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { makeAccountSeed } from "../../fixtures/account.fixture";
+import { makeSessionSeed } from "../../fixtures/session.fixture";
 import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
 
 describe("Adapter Core - Batch Operations (updateMany/deleteMany)", () => {
@@ -68,16 +70,16 @@ describe("Adapter Core - Batch Operations (updateMany/deleteMany)", () => {
 
       // 1. Seed 4 sessions: 2 expired (past), 2 active (future)
       const sessions = [
-        { token: "exp_1", expiresAt: pastDate, userId: "user_1" },
-        { token: "exp_2", expiresAt: pastDate, userId: "user_2" },
-        { token: "act_1", expiresAt: futureDate, userId: "user_3" },
-        { token: "act_2", expiresAt: futureDate, userId: "user_4" },
+        makeSessionSeed({ token: "exp_1", expiresAt: pastDate, userId: "user_1" }),
+        makeSessionSeed({ token: "exp_2", expiresAt: pastDate, userId: "user_2" }),
+        makeSessionSeed({ token: "act_1", expiresAt: futureDate, userId: "user_3" }),
+        makeSessionSeed({ token: "act_2", expiresAt: futureDate, userId: "user_4" }),
       ];
 
       for (const session of sessions) {
         await adapter.create({
           model: "session",
-          data: { ...session, createdAt: new Date(), updatedAt: new Date() },
+          data: session,
         });
       }
 
@@ -106,13 +108,11 @@ describe("Adapter Core - Batch Operations (updateMany/deleteMany)", () => {
       for (let i = 1; i <= 5; i++) {
         await adapter.create({
           model: "account",
-          data: {
+          data: makeAccountSeed({
             providerId: `provider_${i}`,
             accountId: `acc_${i}`,
             userId: `user_${i}`,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
+          }),
         });
       }
 
@@ -136,13 +136,11 @@ describe("Adapter Core - Batch Operations (updateMany/deleteMany)", () => {
       await expect(
         adapter.create({
           model: "session",
-          data: {
+          data: makeSessionSeed({
             token: "bad_ref",
             expiresAt: new Date(Date.now() + 60_000),
             userId: "account:not-a-user",
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
+          }),
         }),
       ).rejects.toThrow(/Reference field "userId" on model "session" expects a "user" record id/);
     });

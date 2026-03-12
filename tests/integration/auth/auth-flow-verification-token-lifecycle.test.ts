@@ -2,6 +2,7 @@ import type { DBAdapter } from "@better-auth/core/db/adapter";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { makeResetPasswordIdentifier } from "../../fixtures/verification.fixture";
 import { buildAdapter, ensureSchema, truncateAuthTables } from "../../test-utils";
 
 describe("Auth Flow - Verification Token Lifecycle", () => {
@@ -65,7 +66,7 @@ describe("Auth Flow - Verification Token Lifecycle", () => {
     const token = resetTokens.get(email.toLowerCase());
     expect(token).toBeDefined();
 
-    const identifier = `reset-password:${token!}`;
+    const identifier = makeResetPasswordIdentifier(token!);
 
     const verificationBefore = await adapter.findOne<Record<string, unknown>>({
       model: "verification",
