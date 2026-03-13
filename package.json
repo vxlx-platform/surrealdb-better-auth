@@ -12,27 +12,34 @@
     "url": "https://github.com/vxlx-platform/surrealdb-better-auth/issues"
   },
   "bin": {
-    "surrealdb-better-auth": "./dist/cli.js"
+    "surrealdb-better-auth": "./dist/cli.mjs"
   },
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
+      "dev-source": "./src/index.ts",
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./schema": {
+      "dev-source": "./src/schema.ts",
+      "types": "./dist/schema.d.mts",
+      "default": "./dist/schema.mjs"
     },
     "./cli": {
-      "import": "./dist/cli.js",
-      "default": "./dist/cli.js"
+      "dev-source": "./src/cli.ts",
+      "default": "./dist/cli.mjs"
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsdown",
+    "dev": "tsdown --watch",
     "dev:server": "bun run ./examples/bun-server.ts",
     "lint": "oxlint src tests vitest.config.ts",
     "lint:fix": "oxlint --fix src tests vitest.config.ts",
@@ -44,7 +51,8 @@
     "test:browser:setup": "playwright install chromium",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:unit": "vitest run tests/unit",
-    "test:integration": "vitest run tests/integration"
+    "test:integration": "vitest run tests/integration",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "better-auth": "^1.5.4",
@@ -60,6 +68,7 @@
     "oxlint-tsgolint": "^0.16.0",
     "playwright": "^1.57.0",
     "surrealdb": "^2.0.2",
+    "tsdown": "^0.21.2",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },

@@ -1,13 +1,14 @@
 import type { DBAdapter } from "@better-auth/core/db/adapter";
-import { type BetterAuthOptions } from "better-auth";
+import type { BetterAuthOptions } from "better-auth";
 import { jwt } from "better-auth/plugins";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { TestServerHandle } from "../../__helpers__/server";
 
 import type { JWKSRow } from "../../types";
 import { getHttpApiBaseUrl, getSurrealHttpHeaders } from "../../__helpers__/env";
 import { expectOkJson, fetchWithTimeout } from "../../__helpers__/http";
-import { type TestServerHandle, startTestServer } from "../../__helpers__/server";
+import { startTestServer } from "../../__helpers__/server";
 import { setupIntegrationAdapter } from "../../test-utils";
 
 describe("Plugin - JWT JWKS Schema", () => {

@@ -1,9 +1,10 @@
 import type { DBAdapter, DBAdapterInstance } from "@better-auth/core/db/adapter";
-import { type BetterAuthOptions, betterAuth } from "better-auth";
+import type { BetterAuthOptions } from "better-auth";
+import { betterAuth } from "better-auth";
 import { describe, expect, it, vi } from "vitest";
 import { Features, Surreal, UnsupportedFeatureError } from "surrealdb";
 
-import { type SurrealAdapterConfig, surrealAdapter } from "../../src";
+import { surrealAdapter } from "../../src";
 
 type SurrealLike = {
   query: Surreal["query"];
@@ -12,6 +13,8 @@ type SurrealLike = {
 };
 
 const TEST_SECRET = "unit-test-secret-that-is-at-least-thirty-two-characters";
+
+type SurrealAdapterConfig = NonNullable<Parameters<typeof surrealAdapter>[1]>;
 
 const buildAdapter = (db: SurrealLike, config?: SurrealAdapterConfig): DBAdapter => {
   const auth = betterAuth({

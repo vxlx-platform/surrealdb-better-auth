@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BetterAuthDBSchema } from "better-auth";
 
-import { applySurqlSchema, generateSurqlSchema } from "../../src/index";
+import { applySurqlSchema, generateSurqlSchema } from "../../src/schema";
 
 type TestSchemaOptions = Parameters<typeof generateSurqlSchema>[0] & {
   apiEndpoints?: boolean | { basePath?: string; models?: string[] };

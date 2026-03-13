@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Switched package builds from `tsc` emit to `tsdown` ESM output.
+- Published entrypoints/types now target `.mjs` and `.d.mts` artifacts.
+- Updated npm package file inclusion to ship only ESM runtime and ESM type artifacts.
+- Split schema/migration helpers into a dedicated `@vxlx/surrealdb-better-auth/schema` entrypoint and kept the root entry focused on adapter runtime.
+- Adapter `createSchema` now lazy-loads the schema module so consumers importing only `surrealAdapter` avoid bundling schema helper implementation code.
+- Narrowed root adapter exports so only `surrealAdapter` is publicly exported from `@vxlx/surrealdb-better-auth`.
+
 ## [0.5.1] - 2026-03-12
 
 ### Changed

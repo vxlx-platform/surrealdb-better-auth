@@ -2,7 +2,8 @@ import { betterAuth } from "better-auth";
 import { jwt } from "better-auth/plugins";
 import { Surreal } from "surrealdb";
 
-import { applySurqlSchema, surrealAdapter } from "../src/index";
+import { surrealAdapter } from "../src/index";
+import { applySurqlSchema } from "../src/schema";
 
 const port = Number(process.env.PORT ?? 3000);
 const endpoint = process.env.SURREALDB_ENDPOINT ?? "ws://localhost:8000/rpc";

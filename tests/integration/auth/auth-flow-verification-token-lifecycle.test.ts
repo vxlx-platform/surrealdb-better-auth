@@ -1,9 +1,10 @@
 import type { DBAdapter } from "@better-auth/core/db/adapter";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { BuiltTestAdapter } from "../../test-utils";
 
 import { makeResetPasswordIdentifier } from "../../fixtures/verification.fixture";
-import { type BuiltTestAdapter, setupIntegrationAdapter } from "../../test-utils";
+import { setupIntegrationAdapter } from "../../test-utils";
 
 describe("Auth Flow - Verification Token Lifecycle", () => {
   let db: Surreal;

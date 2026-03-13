@@ -19,10 +19,10 @@
     "noFallthroughCasesInSwitch": true,
     "noEmitOnError": true,
     "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "rootDir": "src",
-    "outDir": "dist"
+    "emitDeclarationOnly": true,
+    "outDir": "./node_modules/.cache/ts/out",
+    "tsBuildInfoFile": "./node_modules/.cache/ts/tsbuildinfo",
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"],
   "exclude": ["dist", "node_modules", "tests"]

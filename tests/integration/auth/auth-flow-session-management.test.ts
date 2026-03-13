@@ -1,8 +1,9 @@
 import type { DBAdapter } from "@better-auth/core/db/adapter";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { BuiltTestAdapter } from "../../test-utils";
 
-import { type BuiltTestAdapter, setupIntegrationAdapter } from "../../test-utils";
+import { setupIntegrationAdapter } from "../../test-utils";
 
 type TestSession = {
   headers: Headers;

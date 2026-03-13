@@ -1,9 +1,11 @@
 import type { DBAdapter } from "@better-auth/core/db/adapter";
 import type { BetterAuthOptions } from "better-auth";
-import { type Surreal, Table } from "surrealdb";
+import type { Surreal } from "surrealdb";
+import { Table } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { BuiltTestAdapter } from "../../test-utils";
 
-import { type BuiltTestAdapter, setupIntegrationAdapter } from "../../test-utils";
+import { setupIntegrationAdapter } from "../../test-utils";
 
 type CacheEntry = {
   value: string;

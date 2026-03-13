@@ -1,28 +1,24 @@
-import { type BetterAuthDBSchema, type BetterAuthOptions } from "better-auth";
-import {
-  type AdapterFactoryCustomizeAdapterCreator,
-  type AdapterFactoryOptions,
-  type DBAdapterDebugLogOption,
-  type DBTransactionAdapter,
-  type Where,
-  createAdapterFactory,
+import type { BetterAuthDBSchema, BetterAuthOptions } from "better-auth";
+import type {
+  AdapterFactoryCustomizeAdapterCreator,
+  AdapterFactoryOptions,
+  DBAdapterDebugLogOption,
+  DBTransactionAdapter,
+  Where,
 } from "better-auth/adapters";
+import { createAdapterFactory } from "better-auth/adapters";
+import type { Expr, ExprLike, Surreal, SurrealQueryable, SurrealSession } from "surrealdb";
 import {
   BoundQuery,
   ConnectionUnavailableError,
   DateTime,
-  type Expr,
-  type ExprLike,
   Features,
   InvalidSessionError,
   MissingNamespaceDatabaseError,
   RecordId,
   ServerError,
   StringRecordId,
-  type Surreal,
   SurrealError,
-  type SurrealQueryable,
-  type SurrealSession,
   Table,
   UnsupportedFeatureError,
   Uuid,
@@ -40,15 +36,6 @@ import {
   surql,
   u,
 } from "surrealdb";
-
-/**
- * Supported SurrealDB record-id generation formats when Better Auth does not supply an id.
- *
- * - `native`: SurrealDB default random IDs (CREATE table CONTENT ...).
- * - `ulid`: SurrealDB ULID IDs (CREATE table:ulid() CONTENT ...).
- * - `uuidv7`: SurrealDB UUIDv7 IDs (CREATE table:uuid() CONTENT ...).
- */
-export type RecordIdFormat = "native" | "ulid" | "uuidv7";
 
 /**
  * Internal/test-only configuration for optional SurrealDB DEFINE API generation.
@@ -77,47 +64,6 @@ interface SurrealApiEndpointsConfig {
    */
   models?: string[];
 }
-
-/**
- * Configuration options for the SurrealDB Better Auth adapter.
- */
-export interface SurrealAdapterConfig {
-  /**
-   * Whether Better Auth model names should be pluralized.
-   */
-  usePlural?: boolean;
-
-  /**
-   * Enables Better Auth adapter debug logging.
-   */
-  debugLogs?: DBAdapterDebugLogOption;
-
-  /**
-   * Controls how SurrealDB generates record ids when Better Auth does not provide one.
-   *
-   * You can set a single default format:
-   * - `"native"` (default)
-   * - `"ulid"`
-   * - `"uuidv7"`
-   *
-   * Or you can provide a function to control per-table behavior.
-   */
-  recordIdFormat?: RecordIdFormat | ((tableName: string) => RecordIdFormat);
-
-  /**
-   * Controls Better Auth transaction behavior for this adapter.
-   *
-   * - `"auto"` (default): use SurrealDB SDK session transactions when supported by
-   *   the connected engine; otherwise fallback to Better Auth's non-transaction path.
-   * - `true`: require session transactions. If unsupported, transaction calls throw.
-   * - `false`: always disable database-backed transactions.
-   */
-  transaction?: "auto" | boolean;
-}
-
-type InternalSurrealAdapterConfig = SurrealAdapterConfig & {
-  apiEndpoints?: boolean | SurrealApiEndpointsConfig;
-};
 
 type AdapterFactoryHelpers = Parameters<AdapterFactoryCustomizeAdapterCreator>[0];
 
@@ -152,19 +98,6 @@ const RECORD_ID_SUFFIX_RE = /:(?:⟨([^⟩]+)⟩|([^⟩:]+))$/;
  */
 const UUID_LITERAL_RE = /^u(['"])(.+)\1$/;
 
-const SUPPORTED_OPERATORS = new Set([
-  "eq",
-  "ne",
-  "lt",
-  "lte",
-  "gt",
-  "gte",
-  "contains",
-  "in",
-  "starts_with",
-  "ends_with",
-]);
-
 const FIELD_COERCION_RE = /Couldn't coerce value for field `([^`]+)`/i;
 const UNIQUE_CONSTRAINT_RE = /unique|duplicate/i;
 
@@ -185,7 +118,31 @@ type QueryErrorClassification =
  * @param config Optional adapter configuration.
  * @returns A Better Auth adapter factory configured for SurrealDB.
  */
-export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
+export const surrealAdapter = (
+  db: Surreal,
+  config?: {
+    usePlural?: boolean;
+    debugLogs?: DBAdapterDebugLogOption;
+    recordIdFormat?:
+      | "native"
+      | "ulid"
+      | "uuidv7"
+      | ((tableName: string) => "native" | "ulid" | "uuidv7");
+    transaction?: "auto" | boolean;
+  },
+) => {
+  /**
+   * Supported SurrealDB record-id generation formats when Better Auth does not supply an id.
+   *
+   * - `native`: SurrealDB default random IDs (CREATE table CONTENT ...).
+   * - `ulid`: SurrealDB ULID IDs (CREATE table:ulid() CONTENT ...).
+   * - `uuidv7`: SurrealDB UUIDv7 IDs (CREATE table:uuid() CONTENT ...).
+   */
+  type RecordIdFormat = "native" | "ulid" | "uuidv7";
+  type SurrealAdapterConfig = NonNullable<typeof config>;
+  type InternalSurrealAdapterConfig = SurrealAdapterConfig & {
+    apiEndpoints?: boolean | SurrealApiEndpointsConfig;
+  };
   const internalConfig = config as InternalSurrealAdapterConfig | undefined;
   const transactionMode = config?.transaction ?? "auto";
 
@@ -334,36 +291,28 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
       return value;
     }
 
-    if (value instanceof RecordId) {
-      const table = extractRecordTable(value);
-      if (table && table !== refTable) {
+    const assertReferenceTable = (incoming: unknown) => {
+      const incomingTable = extractRecordTable(incoming);
+      if (incomingTable && incomingTable !== refTable) {
         throw adapterError(
           `Reference field "${context.field}" on model "${context.model}" expects a "${refTable}" record id, ` +
-            `received "${table}".`,
+            `received "${incomingTable}".`,
         );
       }
+    };
+
+    if (value instanceof RecordId) {
+      assertReferenceTable(value);
       return value;
     }
 
     if (value instanceof StringRecordId) {
-      const table = extractRecordTable(value);
-      if (table && table !== refTable) {
-        throw adapterError(
-          `Reference field "${context.field}" on model "${context.model}" expects a "${refTable}" record id, ` +
-            `received "${table}".`,
-        );
-      }
+      assertReferenceTable(value);
       return new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(String(value))));
     }
 
     if (typeof value === "string" || typeof value === "number" || typeof value === "bigint") {
-      const table = extractRecordTable(value);
-      if (table && table !== refTable) {
-        throw adapterError(
-          `Reference field "${context.field}" on model "${context.model}" expects a "${refTable}" record id, ` +
-            `received "${table}".`,
-        );
-      }
+      assertReferenceTable(value);
       return new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(value)));
     }
 
@@ -624,12 +573,6 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         const { dbFieldName: fieldName, fieldAttributes } = resolveFieldContext(model, where.field);
         const operator = (where.operator ?? "eq").toLowerCase();
         let value: unknown = where.value;
-
-        if (!SUPPORTED_OPERATORS.has(operator)) {
-          throw adapterError(
-            `Unsupported operator "${operator}" for field "${where.field}" on model "${model}".`,
-          );
-        }
 
         if (operator === "in" && !Array.isArray(value)) {
           throw adapterError(
@@ -972,6 +915,7 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
         },
 
         createSchema: async ({ file, tables }: { file?: string; tables: BetterAuthDBSchema }) => {
+          const { generateSurqlSchema } = await import("./schema.js");
           return generateSurqlSchema({
             file,
             tables,
@@ -1130,193 +1074,4 @@ export const surrealAdapter = (db: Surreal, config?: SurrealAdapterConfig) => {
     lazyOptions = options;
     return baseFactory(options);
   };
-};
-
-/**
- * Arguments for the SurQL schema generator.
- */
-export interface GenerateSurqlSchemaOptions {
-  file?: string;
-  tables?: BetterAuthDBSchema;
-  getModelName: AdapterFactoryHelpers["getModelName"];
-  getFieldName: AdapterFactoryHelpers["getFieldName"];
-  /**
-   * Internal/test-only option for optional SurrealDB DEFINE API generation.
-   */
-  apiEndpoints?: boolean | SurrealApiEndpointsConfig;
-}
-
-export interface ApplySurqlSchemaOptions {
-  db: Surreal;
-  authOptions: BetterAuthOptions;
-  file?: string;
-}
-
-const splitSurqlStatements = (code: string): string[] =>
-  code
-    .split(/;\s*(?:\n|$)/)
-    .map((statement) => statement.trim())
-    .filter(Boolean)
-    .map((statement) => `${statement};`);
-
-export const executeSurqlSchema = async (db: Surreal, code: string) => {
-  for (const statement of splitSurqlStatements(code)) {
-    try {
-      await db.query(statement);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/already exists/i.test(message)) {
-        throw error;
-      }
-    }
-  }
-};
-
-/**
- * Returns a SurQL schema string based on the provided Better Auth schema.
- *
- * This function is decoupled from the adapter factory to allow direct testing.
- */
-export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) => {
-  const { file, tables, getModelName, getFieldName, apiEndpoints } = options;
-  const code: string[] = [];
-  const apiTableNames: string[] = [];
-  const resolvedApiConfig =
-    apiEndpoints === true
-      ? {}
-      : apiEndpoints && typeof apiEndpoints === "object"
-        ? apiEndpoints
-        : null;
-  const apiBasePath = (() => {
-    const raw = resolvedApiConfig?.basePath?.trim() || "";
-    const trimmed = raw.replace(/^\/+|\/+$/g, "");
-    return trimmed ? `/${trimmed}` : "";
-  })();
-  const apiModels = new Set(
-    resolvedApiConfig?.models?.length
-      ? resolvedApiConfig.models
-      : ["user", "session", "account", "jwks"],
-  );
-
-  for (const tableKey in tables) {
-    const table = tables[tableKey];
-    if (!table) continue;
-
-    const tableName = escapeIdent(getModelName(table.modelName));
-    const rawTableName = getModelName(table.modelName);
-    code.push(`DEFINE TABLE ${tableName} SCHEMAFULL;`);
-
-    if (resolvedApiConfig && apiModels.has(table.modelName)) {
-      apiTableNames.push(rawTableName);
-    }
-
-    for (const fieldKey in table.fields) {
-      const field = table.fields[fieldKey];
-      if (!field) continue;
-
-      const dbFieldName = field.fieldName || fieldKey;
-      if (dbFieldName === "id") continue;
-
-      const fieldName = escapeIdent(getFieldName({ field: dbFieldName, model: table.modelName }));
-
-      if (Array.isArray(field.type)) {
-        throw new Error(`Array type not supported: ${JSON.stringify(field.type)}`);
-      }
-
-      const primitiveType = (
-        {
-          string: "string",
-          number: "number",
-          boolean: "bool",
-          date: "datetime",
-          "number[]": "array<number>",
-          "string[]": "array<string>",
-        } as Record<string, string>
-      )[field.type as string];
-
-      let type = primitiveType;
-
-      if (field.references) {
-        type = `record<${escapeIdent(getModelName(field.references.model))}>`;
-      } else if (!type) {
-        throw new Error(
-          `Unsupported field type "${String(field.type)}" for ${table.modelName}.${dbFieldName}`,
-        );
-      }
-
-      if (!field.required) {
-        type = `option<${type}>`;
-      }
-
-      code.push(`DEFINE FIELD ${fieldName} ON ${tableName} TYPE ${type};`);
-
-      if (field.unique) {
-        const base = tableName.replace(/`/g, "");
-        const col = fieldName.replace(/`/g, "");
-        const idxName = `${base}${col.charAt(0).toUpperCase()}${col.slice(1)}_idx`;
-        code.push(
-          `DEFINE INDEX ${escapeIdent(idxName)} ON ${tableName} COLUMNS ${fieldName} UNIQUE;`,
-        );
-      } else if (field.references || fieldKey.toLowerCase().includes("id")) {
-        code.push(
-          `DEFINE INDEX ${escapeIdent(`${fieldName.replace(/`/g, "")}_idx`)} ON ${tableName} COLUMNS ${fieldName};`,
-        );
-      }
-    }
-
-    code.push("");
-  }
-
-  if (resolvedApiConfig) {
-    for (const tableName of apiTableNames) {
-      const path = `${apiBasePath}/${tableName}`;
-      const escapedTable = escapeIdent(tableName);
-      code.push(`DEFINE API OVERWRITE "${path}"`);
-      code.push("  FOR get");
-      code.push("  MIDDLEWARE");
-      code.push('    api::res::body("json")');
-      code.push("  THEN {");
-      code.push("    {");
-      code.push("      status: 200,");
-      code.push(`      body: SELECT * FROM ${escapedTable}`);
-      code.push("    }");
-      code.push("  }");
-      code.push(";");
-      code.push("");
-    }
-  }
-
-  const suggested = file ? file.replace(/\.[^/.]+$/, ".surql") : ".better-auth/schema.surql";
-
-  return { code: code.join("\n"), path: suggested };
-};
-
-/**
- * Generates SurQL from a Better Auth configuration and applies it to the active
- * SurrealDB connection.
- */
-export const applySurqlSchema = async ({ db, authOptions, file }: ApplySurqlSchemaOptions) => {
-  const adapterFactory = authOptions.database as unknown as (input: {
-    plugins?: BetterAuthOptions["plugins"];
-  }) => {
-    createSchema?: (
-      options: BetterAuthOptions,
-      file?: string,
-    ) => Promise<{ code: string; path: string }>;
-  };
-
-  const adapter = adapterFactory({
-    plugins: authOptions.plugins,
-  });
-
-  if (!adapter.createSchema) {
-    throw new Error("The configured Better Auth adapter does not implement createSchema().");
-  }
-
-  const result = await adapter.createSchema(authOptions, file);
-  if (result.code.trim()) {
-    await executeSurqlSchema(db, result.code);
-  }
-
-  return result;
 };

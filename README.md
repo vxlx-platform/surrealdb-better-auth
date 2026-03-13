@@ -128,14 +128,14 @@ The adapter accepts the v2 `Surreal` client directly and uses SDK-native types s
 ## Adapter Options
 
 ```ts
-import { surrealAdapter, type SurrealAdapterConfig } from "@vxlx/surrealdb-better-auth";
+import { surrealAdapter } from "@vxlx/surrealdb-better-auth";
 
-const config: SurrealAdapterConfig = {
+const config = {
   usePlural: false,
   debugLogs: false,
   recordIdFormat: "native", // "native" | "ulid" | "uuidv7" | (tableName) => ...
   transaction: "auto", // "auto" | true | false
-};
+} as const;
 
 const adapter = surrealAdapter(db, config);
 ```
@@ -309,7 +309,7 @@ With that shape, `bunx auth@latest generate` can import your Better Auth config 
 You can generate SurQL through the Better Auth CLI flow or with the standalone generator helper.
 
 ```ts
-import { generateSurqlSchema } from "@vxlx/surrealdb-better-auth";
+import { generateSurqlSchema } from "@vxlx/surrealdb-better-auth/schema";
 
 const result = await generateSurqlSchema({
   file: "better-auth-schema.ts",
@@ -327,7 +327,7 @@ const result = await generateSurqlSchema({
 `applySurqlSchema(...)` is intended for explicit schema application in a migration script, local setup script, or controlled bootstrap step. It is not part of normal request-time adapter usage.
 
 ```ts
-import { applySurqlSchema } from "@vxlx/surrealdb-better-auth";
+import { applySurqlSchema } from "@vxlx/surrealdb-better-auth/schema";
 
 await applySurqlSchema({
   db,
@@ -492,11 +492,13 @@ The browser suite starts the example Bun server automatically and proxies `/api/
 ## Exported API
 
 - `surrealAdapter(db, config?)`
-- `generateSurqlSchema(options)`
-- Types:
-  - `SurrealAdapterConfig`
-  - `RecordIdFormat`
+- `@vxlx/surrealdb-better-auth/schema`
+  - `generateSurqlSchema(options)`
+  - `executeSurqlSchema(db, code)`
+  - `applySurqlSchema(options)`
+- Schema entry types:
   - `GenerateSurqlSchemaOptions`
+  - `ApplySurqlSchemaOptions`
 
 ## Development
 

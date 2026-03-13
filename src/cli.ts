@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import type { BetterAuthOptions } from "better-auth";
 import type { Surreal } from "surrealdb";
 
-import { applySurqlSchema } from "./index.js";
+import { applySurqlSchema } from "./schema.js";
 
 type MigrationModule = {
   [key: string]: unknown;

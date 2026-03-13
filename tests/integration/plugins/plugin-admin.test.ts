@@ -4,8 +4,9 @@ import { admin, testUtils } from "better-auth/plugins";
 import { adminAc, userAc } from "better-auth/plugins/admin/access";
 import type { Surreal } from "surrealdb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { BuiltTestAdapter } from "../../test-utils";
 
-import { type BuiltTestAdapter, setupIntegrationAdapter } from "../../test-utils";
+import { setupIntegrationAdapter } from "../../test-utils";
 
 const _getAuthType = () =>
   betterAuth({

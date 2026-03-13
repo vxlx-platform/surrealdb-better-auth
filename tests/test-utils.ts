@@ -1,9 +1,11 @@
 import type { DBAdapter, DBAdapterInstance } from "@better-auth/core/db/adapter";
-import { type BetterAuthOptions, betterAuth } from "better-auth";
+import type { BetterAuthOptions } from "better-auth";
+import { betterAuth } from "better-auth";
 import { testUtils } from "better-auth/plugins";
 import { Surreal } from "surrealdb";
 
-import { type SurrealAdapterConfig, executeSurqlSchema, surrealAdapter } from "../src";
+import { surrealAdapter } from "../src";
+import { executeSurqlSchema } from "../src/schema";
 import { AUTH_TABLES, truncateTables } from "./__helpers__/db";
 import { getScopedDbName, getTestDbEnv } from "./__helpers__/env";
 
@@ -18,6 +20,8 @@ export async function createTestDb() {
   });
   return { db };
 }
+
+type SurrealAdapterConfig = NonNullable<Parameters<typeof surrealAdapter>[1]>;
 
 type TestOnlyAdapterConfig = SurrealAdapterConfig & {
   apiEndpoints?: boolean | { basePath?: string; models?: string[] };
