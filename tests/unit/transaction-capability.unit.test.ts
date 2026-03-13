@@ -60,19 +60,25 @@ describe("Unit - Transaction Capability Detection", () => {
     const forkSession = vi.fn(async () => {
       throw new UnsupportedFeatureError(Features.Sessions);
     });
+    const query = vi.fn(async () => [[{ count: 0 }]]);
 
     const adapter = buildAdapter(
       {
-        query: vi.fn(async () => [] as unknown[]) as unknown as Surreal["query"],
+        query: query as unknown as Surreal["query"],
         forkSession,
       },
       { transaction: "auto" },
     );
 
-    await expect(adapter.transaction(async () => "fallback-1")).resolves.toBe("fallback-1");
-    await expect(adapter.transaction(async () => "fallback-2")).resolves.toBe("fallback-2");
+    await expect(
+      adapter.transaction(async (trx) => trx.count({ model: "user" })),
+    ).resolves.toBe(0);
+    await expect(
+      adapter.transaction(async (trx) => trx.count({ model: "user" })),
+    ).resolves.toBe(0);
 
     expect(forkSession).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledTimes(2);
   });
 
   it("throws when transactions are explicitly enabled but sessions are unsupported", async () => {
