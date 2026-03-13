@@ -9,7 +9,7 @@ import type {
 } from "@better-auth/core/db/adapter";
 import { createAdapterFactory } from "@better-auth/core/db/adapter";
 import type { BetterAuthDBSchema, DBFieldAttribute } from "@better-auth/core/db";
-import type { Expr } from "surrealdb";
+import type { Expr, Surreal } from "surrealdb";
 import {
   DateTime,
   Features,
@@ -30,22 +30,9 @@ import {
   or,
 } from "surrealdb";
 
-type SurrealQueryClient = {
-  query: <R extends unknown[] = unknown[]>(
-    query: string,
-    bindings?: Record<string, unknown>,
-  ) => Promise<R>;
-};
-
-type SurrealTransactionClient = SurrealQueryClient & {
-  commit: () => Promise<void>;
-  cancel: () => Promise<void>;
-};
-
-type SurrealClient = SurrealQueryClient & {
-  beginTransaction: () => Promise<SurrealTransactionClient>;
-  isFeatureSupported?: (feature: (typeof Features)[keyof typeof Features]) => boolean;
-};
+type SurrealClient = Pick<Surreal, "query" | "beginTransaction" | "isFeatureSupported">;
+type SurrealQueryClient = Pick<SurrealClient, "query">;
+type SurrealTransactionClient = Awaited<ReturnType<SurrealClient["beginTransaction"]>>;
 
 type RecordIdFormat = "native" | "uuidv7" | "ulid";
 
@@ -78,6 +65,9 @@ type AdapterSchema = Record<
     fields: Record<string, { fieldName?: string }>;
   }
 >;
+
+type ModelFieldLookup = Map<string, string>;
+type TransactionRunner = Exclude<NonNullable<AdapterFactoryOptions["config"]["transaction"]>, false>;
 
 /**
  * Better Auth adapter for SurrealDB.
@@ -203,25 +193,27 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     return fieldTypeMap[fieldType];
   };
 
-  const getSchemaModel = (schema: AdapterSchema, modelName: string) =>
-    Object.values(schema).find((table) => table.modelName === modelName) ?? null;
+  const schemaFieldLookupCache = new WeakMap<AdapterSchema, Map<string, ModelFieldLookup>>();
 
-  const resolveDefaultFieldName = (schema: AdapterSchema, model: string, field: string) => {
-    const modelSchema = getSchemaModel(schema, model);
-    if (!modelSchema) return field;
-    const entry = Object.entries(modelSchema.fields).find(
-      ([name, attributes]) => (attributes.fieldName ?? name) === field,
-    );
-    return entry?.[0] ?? field;
-  };
+  const getSchemaFieldLookup = (schema: AdapterSchema): Map<string, ModelFieldLookup> => {
+    const cached = schemaFieldLookupCache.get(schema);
+    if (cached) return cached;
 
-  const canonicalRecordId = (value: string) => {
-    try {
-      return new StringRecordId(value).toString();
-    } catch {
-      return null;
+    const lookup = new Map<string, ModelFieldLookup>();
+    for (const table of Object.values(schema)) {
+      const modelLookup: ModelFieldLookup = new Map();
+      for (const [name, attributes] of Object.entries(table.fields)) {
+        modelLookup.set(attributes.fieldName ?? name, name);
+      }
+      lookup.set(table.modelName, modelLookup);
     }
+
+    schemaFieldLookupCache.set(schema, lookup);
+    return lookup;
   };
+
+  const resolveDefaultFieldName = (schema: AdapterSchema, model: string, field: string) =>
+    getSchemaFieldLookup(schema).get(model)?.get(field) ?? field;
 
   const normalizeDateValue = (value: unknown) => {
     const isDateTimeLike = (
@@ -246,20 +238,19 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
   };
 
   const normalizeRecordIdValue = (value: unknown) => {
-    const isStringableObject = (candidate: unknown): candidate is { toString: () => string } =>
-      typeof candidate === "object" &&
-      candidate !== null &&
-      typeof candidate.toString === "function";
+    const asString =
+      value instanceof RecordId || value instanceof StringRecordId
+        ? value.toString()
+        : typeof value === "string"
+          ? value
+          : null;
 
-    if (value instanceof RecordId || value instanceof StringRecordId) return value.toString();
-    if (typeof value === "string") {
-      return canonicalRecordId(value) ?? value;
+    if (!asString) return value;
+    try {
+      return new StringRecordId(asString).toString();
+    } catch {
+      return asString;
     }
-    if (isStringableObject(value)) {
-      const asString = value.toString();
-      return canonicalRecordId(asString) ?? asString;
-    }
-    return value;
   };
 
   const startsWithExpr = (field: string, value: string): Expr => ({
@@ -295,6 +286,11 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     throw adapterError(`Operator "${operator}" requires a string value.`);
   };
 
+  const expectArrayValue = (value: unknown, operator: "in" | "not_in"): unknown[] => {
+    if (Array.isArray(value)) return value;
+    throw adapterError(`Operator "${operator}" requires an array value.`);
+  };
+
   const formatUnknown = (value: unknown): string => {
     if (typeof value === "string") return value;
     if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
@@ -314,6 +310,23 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     if (value === undefined) return "eq";
     if (isSupportedWhereOperator(value)) return value;
     throw adapterError(`Unsupported where operator "${formatUnknown(value)}".`);
+  };
+
+  const whereOperatorHandlers: Record<
+    SupportedWhereOperator,
+    (field: string, value: unknown) => Expr
+  > = {
+    eq: (field, value) => eq(field, value),
+    ne: (field, value) => ne(field, value),
+    lt: (field, value) => lt(field, value),
+    lte: (field, value) => lte(field, value),
+    gt: (field, value) => gt(field, value),
+    gte: (field, value) => gte(field, value),
+    contains: (field, value) => contains(field, value),
+    in: (field, value) => inside(field, expectArrayValue(value, "in")),
+    not_in: (field, value) => not(inside(field, expectArrayValue(value, "not_in"))),
+    starts_with: (field, value) => startsWithExpr(field, expectStringValue(value, "starts_with")),
+    ends_with: (field, value) => endsWithExpr(field, expectStringValue(value, "ends_with")),
   };
 
   const generateSchemaCode = ({
@@ -339,8 +352,40 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     );
     const apiBasePath = apiCfg?.basePath ? `/${apiCfg.basePath.replace(/^\/+|\/+$/g, "")}` : "";
     const apiTables: string[] = [];
+    type SchemaTable = (typeof tables)[string];
 
-    for (const table of Object.values(tables)) {
+    const emitUniqueIndex = (tableName: string, resolvedField: string) => {
+      const indexName = `${tableName.replace(/`/g, "")}${resolvedField.replace(/`/g, "")}_idx`;
+      lines.push(
+        `DEFINE INDEX ${escapeIdent(indexName)} ON ${tableName} COLUMNS ${resolvedField} UNIQUE;`,
+      );
+    };
+
+    const emitFieldDefinition = ({
+      modelName,
+      tableName,
+      fieldKey,
+      field,
+    }: {
+      modelName: string;
+      tableName: string;
+      fieldKey: string;
+      field: SchemaTable["fields"][string];
+    }) => {
+      const dbFieldName = field.fieldName ?? fieldKey;
+      if (dbFieldName === "id") return;
+
+      const resolvedField = escapeIdent(getFieldName({ model: modelName, field: dbFieldName }));
+      const fieldType = field.references
+        ? `record<${escapeIdent(getModelName(field.references.model))}>`
+        : resolveSchemaType(modelName, dbFieldName, field.type);
+      const requiredType = field.required ? fieldType : `option<${fieldType}>`;
+      lines.push(`DEFINE FIELD ${resolvedField} ON ${tableName} TYPE ${requiredType};`);
+
+      if (field.unique) emitUniqueIndex(tableName, resolvedField);
+    };
+
+    const emitTableDefinition = (table: SchemaTable) => {
       const modelName = table.modelName;
       const tableName = escapeIdent(getModelName(modelName));
       lines.push(`DEFINE TABLE ${tableName} SCHEMAFULL;`);
@@ -350,47 +395,43 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       }
 
       for (const [fieldKey, field] of Object.entries(table.fields)) {
-        const dbFieldName = field.fieldName ?? fieldKey;
-        if (dbFieldName === "id") continue;
-
-        const resolvedField = escapeIdent(getFieldName({ model: modelName, field: dbFieldName }));
-        const type = field.references
-          ? `record<${escapeIdent(getModelName(field.references.model))}>`
-          : resolveSchemaType(modelName, dbFieldName, field.type);
-
-        const fieldType = field.required ? type : `option<${type}>`;
-
-        lines.push(`DEFINE FIELD ${resolvedField} ON ${tableName} TYPE ${fieldType};`);
-
-        if (field.unique) {
-          const indexName = `${tableName.replace(/`/g, "")}${resolvedField.replace(/`/g, "")}_idx`;
-          lines.push(
-            `DEFINE INDEX ${escapeIdent(indexName)} ON ${tableName} COLUMNS ${resolvedField} UNIQUE;`,
-          );
-        }
+        emitFieldDefinition({
+          modelName,
+          tableName,
+          fieldKey,
+          field,
+        });
       }
 
       lines.push("");
+    };
+
+    const emitApiEndpoint = (tableName: string) => {
+      const escapedTable = escapeIdent(tableName);
+      const path = `${apiBasePath}/${tableName}`;
+      lines.push(
+        `DEFINE API OVERWRITE "${path}"`,
+        "  FOR get",
+        "  MIDDLEWARE",
+        '    api::res::body("json")',
+        "  THEN {",
+        "    {",
+        "      status: 200,",
+        `      body: SELECT * FROM ${escapedTable}`,
+        "    }",
+        "  }",
+        ";",
+        "",
+      );
+    };
+
+    for (const table of Object.values(tables)) {
+      emitTableDefinition(table);
     }
 
     if (apiCfg) {
       for (const tableName of apiTables) {
-        const escapedTable = escapeIdent(tableName);
-        const path = `${apiBasePath}/${tableName}`;
-        lines.push(
-          `DEFINE API OVERWRITE "${path}"`,
-          "  FOR get",
-          "  MIDDLEWARE",
-          '    api::res::body("json")',
-          "  THEN {",
-          "    {",
-          "      status: 200,",
-          `      body: SELECT * FROM ${escapedTable}`,
-          "    }",
-          "  }",
-          ";",
-          "",
-        );
+        emitApiEndpoint(tableName);
       }
     }
 
@@ -425,39 +466,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           ? toRecordIdInput(item.value, expectedReferenceTable)
           : item.value;
 
-      if (operator === "in" || operator === "not_in") {
-        if (!Array.isArray(item.value)) {
-          throw adapterError(`Operator "${operator}" requires an array value.`);
-        }
-      }
-      if (operator === "starts_with" || operator === "ends_with") {
-        expectStringValue(item.value, operator);
-      }
-
-      switch (operator) {
-        case "eq":
-          return eq(field, normalizedValue);
-        case "ne":
-          return ne(field, normalizedValue);
-        case "lt":
-          return lt(field, normalizedValue);
-        case "lte":
-          return lte(field, normalizedValue);
-        case "gt":
-          return gt(field, normalizedValue);
-        case "gte":
-          return gte(field, normalizedValue);
-        case "contains":
-          return contains(field, normalizedValue);
-        case "in":
-          return inside(field, normalizedValue);
-        case "not_in":
-          return not(inside(field, normalizedValue));
-        case "starts_with":
-          return startsWithExpr(field, expectStringValue(item.value, "starts_with"));
-        case "ends_with":
-          return endsWithExpr(field, expectStringValue(item.value, "ends_with"));
-      }
+      return whereOperatorHandlers[operator](field, normalizedValue);
     };
 
     let condition = toConditionExpr(where[0]!);
@@ -495,6 +504,38 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         const result = await db.query<QueryRows<T>>(query, bindings);
         return toResultRows<T>(result);
       };
+
+      const selectColumns = (select?: string[]) =>
+        select && select.length > 0 ? select.map((field) => escapeIdent(field)).join(", ") : "*";
+
+      const joinQueryParts = (...parts: Array<string | undefined>) =>
+        parts
+          .filter((part): part is string => typeof part === "string" && part.length > 0)
+          .join(" ");
+
+      const buildSelectQuery = ({
+        columns,
+        tableName,
+        whereClause,
+        orderBy,
+        limitClause,
+        offsetClause,
+      }: {
+        columns: string;
+        tableName: string;
+        whereClause: string;
+        orderBy?: string;
+        limitClause?: string;
+        offsetClause?: string;
+      }) =>
+        `${joinQueryParts(
+          `SELECT ${columns}`,
+          `FROM ${tableName}`,
+          whereClause,
+          orderBy,
+          limitClause,
+          offsetClause,
+        )};`;
 
       const idFieldForModel = (model: string) => getFieldName({ model, field: "id" });
 
@@ -568,12 +609,14 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         }): Promise<T | null> {
           const tableName = escapeIdent(model);
           const idField = idFieldForModel(model);
-          const columns =
-            select && select.length > 0
-              ? select.map((field) => escapeIdent(field)).join(", ")
-              : "*";
+          const columns = selectColumns(select);
           const whereClause = buildWhereClause(where, model, idField);
-          const query = `SELECT ${columns} FROM ${tableName} ${whereClause.clause} LIMIT 1;`;
+          const query = buildSelectQuery({
+            columns,
+            tableName,
+            whereClause: whereClause.clause,
+            limitClause: "LIMIT 1",
+          });
           return await queryOne<T>(query, whereClause.bindings);
         },
 
@@ -594,25 +637,26 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         }): Promise<T[]> {
           const tableName = escapeIdent(model);
           const idField = idFieldForModel(model);
-          const columns =
-            select && select.length > 0
-              ? select.map((field) => escapeIdent(field)).join(", ")
-              : "*";
+          const columns = selectColumns(select);
           const whereClause = buildWhereClause(where, model, idField);
           const bindings: Record<string, unknown> = { ...whereClause.bindings };
           const orderBy = sortBy
             ? `ORDER BY ${escapeIdent(sortBy.field)} ${sortBy.direction.toUpperCase()}`
-            : "";
-          const limitClause = typeof limit === "number" ? "LIMIT $limit" : "";
-          const offsetClause = typeof offset === "number" ? "START $offset" : "";
+            : undefined;
+          const limitClause = typeof limit === "number" ? "LIMIT $limit" : undefined;
+          const offsetClause = typeof offset === "number" ? "START $offset" : undefined;
 
           if (typeof limit === "number") bindings.limit = limit;
           if (typeof offset === "number") bindings.offset = offset;
 
-          const query =
-            `SELECT ${columns} FROM ${tableName} ${whereClause.clause} ${orderBy} ${limitClause} ${offsetClause};`
-              .replace(/\s+/g, " ")
-              .trim();
+          const query = buildSelectQuery({
+            columns,
+            tableName,
+            whereClause: whereClause.clause,
+            orderBy,
+            limitClause,
+            offsetClause,
+          });
           return await queryMany<T>(query, bindings);
         },
 
@@ -708,6 +752,30 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       return customAdapter;
     };
 
+  const createTransactionRunner = (): TransactionRunner => async (callback) => {
+    const tx: SurrealTransactionClient = await client.beginTransaction();
+    const txAdapter = createAdapterFactory({
+      config: {
+        ...adapterFactoryOptions!.config,
+        transaction: false,
+      },
+      adapter: createCustomAdapter(tx),
+    })(lazyOptions!);
+
+    try {
+      const result = await callback(txAdapter);
+      await tx.commit();
+      return result;
+    } catch (error) {
+      try {
+        await tx.cancel();
+      } catch {
+        // Ignore cancellation failures and preserve the original failure.
+      }
+      throw error;
+    }
+  };
+
   const enableTransactions = supportsTransactions();
 
   adapterFactoryOptions = {
@@ -762,31 +830,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
 
         return normalizeRecordIdValue(data);
       },
-      transaction: enableTransactions
-        ? async (callback) => {
-            const tx = await client.beginTransaction();
-            const txAdapter = createAdapterFactory({
-              config: {
-                ...adapterFactoryOptions!.config,
-                transaction: false,
-              },
-              adapter: createCustomAdapter(tx),
-            })(lazyOptions!);
-
-            try {
-              const result = await callback(txAdapter);
-              await tx.commit();
-              return result;
-            } catch (error) {
-              try {
-                await tx.cancel();
-              } catch {
-                // Ignore cancellation failures and preserve the original failure.
-              }
-              throw error;
-            }
-          }
-        : false,
+      transaction: enableTransactions ? createTransactionRunner() : false,
     },
     adapter: createCustomAdapter(client),
   };
