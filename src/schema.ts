@@ -33,19 +33,15 @@ export interface ApplySurqlSchemaOptions {
 const splitSurqlStatements = (code: string): string[] =>
   code
     .split(/;\s*(?:\n|$)/)
-    .map((statement) => statement.trim())
-    .filter(Boolean)
-    .map((statement) => `${statement};`);
+    .filter((statement) => statement.trim())
+    .map((statement) => `${statement.trim()};`);
 
 export const executeSurqlSchema = async (db: Surreal, code: string) => {
   for (const statement of splitSurqlStatements(code)) {
     try {
       await db.query(statement);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/already exists/i.test(message)) {
-        throw error;
-      }
+      if (!/already exists/i.test(error instanceof Error ? error.message : String(error))) throw error;
     }
   }
 };
@@ -57,108 +53,71 @@ export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) =
   const { file, tables, getModelName, getFieldName, apiEndpoints } = options;
   const code: string[] = [];
   const apiTableNames: string[] = [];
-  const resolvedApiConfig =
-    apiEndpoints === true
-      ? {}
-      : apiEndpoints && typeof apiEndpoints === "object"
-        ? apiEndpoints
-        : null;
-  const apiBasePath = (() => {
-    const raw = resolvedApiConfig?.basePath?.trim() || "";
-    const trimmed = raw.replace(/^\/+|\/+$/g, "");
-    return trimmed ? `/${trimmed}` : "";
-  })();
-  const apiModels = new Set(
-    resolvedApiConfig?.models?.length
-      ? resolvedApiConfig.models
-      : ["user", "session", "account", "jwks"],
-  );
+  const apiCfg = apiEndpoints === true ? {} : apiEndpoints && typeof apiEndpoints === "object" ? apiEndpoints : null;
+  const apiBasePath = apiCfg?.basePath ? `/${apiCfg.basePath.replace(/^\/+|\/+$/g, "")}` : "";
+  const apiModels = new Set(apiCfg?.models?.length ? apiCfg.models : ["user", "session", "account", "jwks"]);
 
-  for (const tableKey in tables) {
-    const table = tables[tableKey];
-    if (!table) continue;
-
-    const tableName = escapeIdent(getModelName(table.modelName));
+  for (const table of Object.values(tables || {}).filter(Boolean)) {
     const rawTableName = getModelName(table.modelName);
+    const tableName = escapeIdent(rawTableName);
     code.push(`DEFINE TABLE ${tableName} SCHEMAFULL;`);
 
-    if (resolvedApiConfig && apiModels.has(table.modelName)) {
-      apiTableNames.push(rawTableName);
-    }
+    if (apiCfg && apiModels.has(table.modelName)) apiTableNames.push(rawTableName);
 
-    for (const fieldKey in table.fields) {
-      const field = table.fields[fieldKey];
-      if (!field) continue;
-
+    for (const [fieldKey, field] of Object.entries(table.fields).filter(([_, f]) => f)) {
       const dbFieldName = field.fieldName || fieldKey;
       if (dbFieldName === "id") continue;
 
       const fieldName = escapeIdent(getFieldName({ field: dbFieldName, model: table.modelName }));
+      if (Array.isArray(field.type)) throw new Error(`Array type not supported: ${JSON.stringify(field.type)}`);
 
-      if (Array.isArray(field.type)) {
-        throw new Error(`Array type not supported: ${JSON.stringify(field.type)}`);
-      }
+      const primitiveTypes: Record<string, string> = {
+        string: "string",
+        number: "number",
+        boolean: "bool",
+        date: "datetime",
+        "number[]": "array<number>",
+        "string[]": "array<string>",
+      };
 
-      const primitiveType = (
-        {
-          string: "string",
-          number: "number",
-          boolean: "bool",
-          date: "datetime",
-          "number[]": "array<number>",
-          "string[]": "array<string>",
-        } as Record<string, string>
-      )[field.type as string];
+      let type = field.references
+        ? `record<${escapeIdent(getModelName(field.references.model))}>`
+        : primitiveTypes[field.type as string];
 
-      let type = primitiveType;
-
-      if (field.references) {
-        type = `record<${escapeIdent(getModelName(field.references.model))}>`;
-      } else if (!type) {
-        throw new Error(
-          `Unsupported field type "${String(field.type)}" for ${table.modelName}.${dbFieldName}`,
-        );
-      }
-
-      if (!field.required) {
-        type = `option<${type}>`;
-      }
+      if (!type) throw new Error(`Unsupported field type "${String(field.type)}" for ${table.modelName}.${dbFieldName}`);
+      if (!field.required) type = `option<${type}>`;
 
       code.push(`DEFINE FIELD ${fieldName} ON ${tableName} TYPE ${type};`);
 
       if (field.unique) {
-        const base = tableName.replace(/`/g, "");
-        const col = fieldName.replace(/`/g, "");
+        const base = tableName.replace(/`/g, ""),
+          col = fieldName.replace(/`/g, "");
         const idxName = `${base}${col.charAt(0).toUpperCase()}${col.slice(1)}_idx`;
-        code.push(
-          `DEFINE INDEX ${escapeIdent(idxName)} ON ${tableName} COLUMNS ${fieldName} UNIQUE;`,
-        );
+        code.push(`DEFINE INDEX ${escapeIdent(idxName)} ON ${tableName} COLUMNS ${fieldName} UNIQUE;`);
       } else if (field.references || fieldKey.toLowerCase().includes("id")) {
-        code.push(
-          `DEFINE INDEX ${escapeIdent(`${fieldName.replace(/`/g, "")}_idx`)} ON ${tableName} COLUMNS ${fieldName};`,
-        );
+        code.push(`DEFINE INDEX ${escapeIdent(`${fieldName.replace(/`/g, "")}_idx`)} ON ${tableName} COLUMNS ${fieldName};`);
       }
     }
-
     code.push("");
   }
 
-  if (resolvedApiConfig) {
+  if (apiCfg) {
     for (const tableName of apiTableNames) {
       const path = `${apiBasePath}/${tableName}`;
-      const escapedTable = escapeIdent(tableName);
-      code.push(`DEFINE API OVERWRITE "${path}"`);
-      code.push("  FOR get");
-      code.push("  MIDDLEWARE");
-      code.push('    api::res::body("json")');
-      code.push("  THEN {");
-      code.push("    {");
-      code.push("      status: 200,");
-      code.push(`      body: SELECT * FROM ${escapedTable}`);
-      code.push("    }");
-      code.push("  }");
-      code.push(";");
-      code.push("");
+      code.push(
+        `DEFINE API OVERWRITE "${path}"`,
+        "  FOR get",
+        "  MIDDLEWARE",
+        '    api::res::body("json")',
+        "  THEN {",
+        "    {",
+        "      status: 200,",
+        `      body: SELECT * FROM ${escapeIdent(tableName)}`,
+        "    }",
+        "  }",
+        ";",
+        "",
+      );
     }
   }
 

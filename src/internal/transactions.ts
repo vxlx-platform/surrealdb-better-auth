@@ -10,14 +10,9 @@ type TransactionExecutor = Exclude<
 
 /** Reads SDK feature flags when available (`null` means indeterminate). */
 export const detectTransactionFeatureSupport = (db: Surreal): boolean | null => {
-  if (typeof db.isFeatureSupported !== "function") {
-    return null;
-  }
-
+  if (typeof db.isFeatureSupported !== "function") return null;
   try {
-    const supportsSessions = db.isFeatureSupported(Features.Sessions);
-    const supportsTransactions = db.isFeatureSupported(Features.Transactions);
-    return supportsSessions && supportsTransactions;
+    return db.isFeatureSupported(Features.Sessions) && db.isFeatureSupported(Features.Transactions);
   } catch {
     return null;
   }
@@ -25,12 +20,10 @@ export const detectTransactionFeatureSupport = (db: Surreal): boolean | null => 
 
 /** Detects engines that expose session APIs but fail at runtime for session support. */
 export const isUnsupportedSessionsFeatureError = (error: unknown): boolean => {
-  if (error instanceof UnsupportedFeatureError) {
-    return true;
-  }
+  if (error instanceof UnsupportedFeatureError) return true;
   if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-    return message.includes("does not support the feature") && message.includes("sessions");
+    const msg = error.message.toLowerCase();
+    return msg.includes("does not support the feature") && msg.includes("sessions");
   }
   return false;
 };
@@ -60,7 +53,7 @@ export const createTransactionExecutor = ({
 }): AdapterFactoryOptions["config"]["transaction"] => {
   const shouldEnableTransactionExecutor =
     transactionMode !== false &&
-    !(transactionMode === "auto" && (!hasForkSessionMethod || initialTransactionSupport === false));
+    (transactionMode === true || (hasForkSessionMethod && initialTransactionSupport !== false));
 
   if (!shouldEnableTransactionExecutor) {
     return false;
@@ -93,41 +86,34 @@ export const createTransactionExecutor = ({
   const transactionHandler: TransactionExecutor = async <R>(
     callback: (trx: DBTransactionAdapter) => Promise<R>,
   ): Promise<R> => {
+    const fallback = () => runWithoutDatabaseTransaction(callback);
+    const onUnsupported = (error: unknown, wrapperMessage?: string) => {
+      if (isUnsupportedSessionsFeatureError(error) && transactionMode !== true) {
+        runtimeTransactionDisabled = true;
+        return fallback();
+      }
+      throw wrapperMessage ? adapterError(wrapperMessage, error) : error;
+    };
+
     if (!hasForkSessionMethod) {
       if (transactionMode === true) {
         throw adapterError(
           "Transactions were explicitly enabled, but this SurrealDB client does not expose forkSession().",
         );
       }
-      return runWithoutDatabaseTransaction(callback);
+      return fallback();
     }
 
-    if (runtimeTransactionDisabled && transactionMode !== true) {
-      return runWithoutDatabaseTransaction(callback);
-    }
+    if (runtimeTransactionDisabled && transactionMode !== true) return fallback();
 
     let session: SurrealSession | null = null;
-
     try {
       session = await db.forkSession();
-    } catch (error) {
-      if (isUnsupportedSessionsFeatureError(error) && transactionMode !== true) {
-        runtimeTransactionDisabled = true;
-        return runWithoutDatabaseTransaction(callback);
-      }
-      throw adapterError("Failed to initialize a SurrealDB transaction session.", error);
-    }
-
-    try {
       return await executeWithSessionTransaction(session, callback);
     } catch (error) {
-      if (isUnsupportedSessionsFeatureError(error) && transactionMode !== true) {
-        runtimeTransactionDisabled = true;
-        return runWithoutDatabaseTransaction(callback);
-      }
-      throw error;
+      return onUnsupported(error, !session ? "Failed to initialize a SurrealDB transaction session." : undefined);
     } finally {
-      await session.closeSession();
+      await session?.closeSession();
     }
   };
 

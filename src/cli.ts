@@ -28,26 +28,15 @@ const printUsage = () => {
 
 const parseArgs = (argv: string[]) => {
   const args = argv.slice(2);
-  const command = args[0];
-  let config: string | undefined;
-  let authExport = "auth";
-  let dbExport = "db";
-  let file: string | undefined;
-
-  for (let i = 1; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--config") {
-      config = args[++i];
-    } else if (arg === "--auth") {
-      authExport = args[++i] ?? authExport;
-    } else if (arg === "--db") {
-      dbExport = args[++i] ?? dbExport;
-    } else if (arg === "--file") {
-      file = args[++i];
-    }
-  }
-
-  return { command, config, authExport, dbExport, file };
+  const opts: Record<string, string> = {};
+  for (let index = 1; index < args.length; index += 2) opts[args[index]!] = args[index + 1]!;
+  return {
+    command: args[0],
+    config: opts["--config"],
+    authExport: opts["--auth"] || "auth",
+    dbExport: opts["--db"] || "db",
+    file: opts["--file"],
+  };
 };
 
 const resolveExport = <T>(mod: MigrationModule, key: string): T | undefined => {
@@ -63,12 +52,7 @@ const resolveExport = <T>(mod: MigrationModule, key: string): T | undefined => {
 
 const main = async () => {
   const { command, config, authExport, dbExport, file } = parseArgs(process.argv);
-
-  if (command !== "migrate" || !config) {
-    printUsage();
-    process.exitCode = 1;
-    return;
-  }
+  if (command !== "migrate" || !config) return printUsage(), (process.exitCode = 1), undefined;
 
   const absoluteConfig = resolve(process.cwd(), config);
   const mod = (await import(pathToFileURL(absoluteConfig).href)) as MigrationModule;

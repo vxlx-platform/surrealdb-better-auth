@@ -15,26 +15,24 @@ const normalizeUuidLiteral = (value: string): string => {
 
 /** Parses string record-id variants into `{ table, idComponent }`. */
 const parseRecordIdString = (raw: string): ParsedRecordIdLike => {
-  const separatorIndex = raw.indexOf(":");
-  const table = separatorIndex > 0 ? raw.slice(0, separatorIndex) : null;
-  const match = raw.match(RECORD_ID_SUFFIX_RE);
-  const idPart = match ? (match[1] ?? match[2] ?? raw) : raw;
-  return { table, idComponent: normalizeUuidLiteral(idPart) };
+  const i = raw.indexOf(":");
+  const m = raw.match(RECORD_ID_SUFFIX_RE);
+  return {
+    table: i > 0 ? raw.slice(0, i) : null,
+    idComponent: normalizeUuidLiteral(m?.[1] ?? m?.[2] ?? raw),
+  };
 };
 
 /** Parses RecordId/StringRecordId/string/number/bigint values into a unified id shape. */
-const parseRecordIdLike = (value: unknown): ParsedRecordIdLike | null => {
-  if (value instanceof RecordId) {
-    const idPart = value.id;
+const parseRecordIdLike = (val: unknown): ParsedRecordIdLike | null => {
+  if (val instanceof RecordId)
     return {
-      table: value.table.name,
-      idComponent: idPart instanceof Uuid ? idPart.toString() : String(idPart),
+      table: val.table.name,
+      idComponent: val.id instanceof Uuid ? val.id.toString() : String(val.id),
     };
-  }
-  if (value instanceof StringRecordId) return parseRecordIdString(String(value));
-  if (typeof value === "string") return parseRecordIdString(value);
-  if (typeof value === "number" || typeof value === "bigint")
-    return { table: null, idComponent: String(value) };
+  if (val instanceof StringRecordId || typeof val === "string") return parseRecordIdString(String(val));
+  if (typeof val === "number" || typeof val === "bigint")
+    return { table: null, idComponent: String(val) };
   return null;
 };
 
@@ -53,40 +51,29 @@ export const createIdHelpers = ({
   adapterError: AdapterErrorFactory;
 }) => {
   /** Converts ids to a proper Surreal record-id part based on configured table format. */
-  const toRecordIdPart = (tableName: string, idComponent: string): string | Uuid => {
-    return resolveIdFormat(tableName) === "uuidv7" ? u`${idComponent}` : idComponent;
-  };
+  const toRecordIdPart = (tableName: string, id: string): string | Uuid =>
+    resolveIdFormat(tableName) === "uuidv7" ? u`${id}` : id;
+
   const toRecordId = (tableName: string, value: unknown): RecordId =>
     new RecordId(tableName, toRecordIdPart(tableName, toIdComponent(value)));
 
   /** Normalizes Better Auth reference-field inputs into Surreal `RecordId` values. */
-  const normalizeReferenceInput = (
-    refTable: string,
-    value: unknown,
-    context: ReferenceContext,
-  ): unknown => {
-    if (value == null) return value;
-    const assertReferenceTable = (incomingTable: string | null) => {
-      if (incomingTable && incomingTable !== refTable) {
+  const normalizeReferenceInput = (ref: string, val: unknown, ctx: ReferenceContext): unknown => {
+    if (val == null) return val;
+    const assertTable = (inc: string | null) => {
+      if (inc && inc !== ref) {
         throw adapterError(
-          `Reference field "${context.field}" on model "${context.model}" expects a "${refTable}" record id, ` +
-            `received "${incomingTable}".`,
+          `Reference field "${ctx.field}" on model "${ctx.model}" expects a "${ref}" record id, received "${inc}".`,
         );
       }
     };
-    if (value instanceof RecordId) {
-      assertReferenceTable(value.table.name);
-      return value;
-    }
-    const parsed = parseRecordIdLike(value);
-    if (parsed) {
-      assertReferenceTable(parsed.table);
-      return new RecordId(refTable, toRecordIdPart(refTable, parsed.idComponent));
-    }
+    if (val instanceof RecordId) return (assertTable(val.table.name), val);
+    const p = parseRecordIdLike(val);
+    if (p) return (assertTable(p.table), new RecordId(ref, toRecordIdPart(ref, p.idComponent)));
 
     throw adapterError(
-      `Reference field "${context.field}" on model "${context.model}" requires a record id-compatible value` +
-        `${context.operator ? ` for operator "${context.operator}"` : ""}.`,
+      `Reference field "${ctx.field}" on model "${ctx.model}" requires a record id-compatible value` +
+        `${ctx.operator ? ` for operator "${ctx.operator}"` : ""}.`,
     );
   };
 

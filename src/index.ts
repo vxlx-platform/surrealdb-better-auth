@@ -96,6 +96,7 @@ export const surrealAdapter = (
       `Unsupported recordIdFormat "${String(resolved)}" for table "${tableName}". Use "native", "ulid", or "uuidv7".`,
     );
   };
+
   const { normalizeReferenceInput, stripRecordPrefix, toRecordId } = createIdHelpers({
     resolveIdFormat,
     adapterError,
@@ -126,38 +127,43 @@ export const surrealAdapter = (
           );
         }
       };
+
       const assertWritePayload = (model: string, input: Record<string, unknown>) => {
         for (const key of Object.keys(input)) {
           if (key !== "id") resolveFieldContext(model, key);
         }
       };
+
       const safeConnector = (connector?: string): "AND" | "OR" =>
         connector?.toUpperCase() === "OR" ? "OR" : "AND";
+
       const stripIdFromPayload = <T extends Record<string, unknown>>(input: T): Omit<T, "id"> => {
         const { id: _id, ...rest } = input;
         return rest;
       };
-      const normalizeNullToNone = (value: unknown): unknown => {
-        if (value === null) return undefined;
+
+      const normalizeNullToNone = (val: unknown): unknown => {
+        if (val === null) return undefined;
+        if (Array.isArray(val)) return val.map(normalizeNullToNone);
         if (
-          value instanceof RecordId ||
-          value instanceof StringRecordId ||
-          value instanceof Uuid ||
-          value instanceof Date ||
-          value instanceof Uint8Array
+          val &&
+          typeof val === "object" &&
+          !(
+            val instanceof RecordId ||
+            val instanceof StringRecordId ||
+            val instanceof Uuid ||
+            val instanceof Date ||
+            val instanceof Uint8Array
+          )
         ) {
-          return value;
-        }
-        if (Array.isArray(value)) return value.map(normalizeNullToNone);
-        if (value && typeof value === "object") {
-          const proto = Object.getPrototypeOf(value);
+          const proto = Object.getPrototypeOf(val);
           if (proto === null || proto === Object.prototype || proto.constructor.name === "Object") {
-            const normalized: Record<string, unknown> = {};
-            for (const [k, v] of Object.entries(value)) normalized[k] = normalizeNullToNone(v);
-            return normalized;
+            return Object.fromEntries(
+              Object.entries(val).map(([key, val]) => [key, normalizeNullToNone(val)]),
+            );
           }
         }
-        return value;
+        return val;
       };
 
       /**
@@ -168,26 +174,31 @@ export const surrealAdapter = (
         table: string,
         where?: Where[],
       ): { target: QueryTarget; rest: Where[] } => {
-        if (!where?.length) return { target: new Table(table), rest: [] };
-        if (where.some((w, i) => i > 0 && safeConnector(w.connector) === "OR"))
-          return { target: new Table(table), rest: where };
+        const fallback = { target: new Table(table), rest: where ?? [] };
+        if (
+          !where?.length ||
+          where.some((whereItem, index) => index > 0 && safeConnector(whereItem.connector) === "OR")
+        ) {
+          return fallback;
+        }
+
         const ids: RecordId[] = [];
         const rest: Where[] = [];
-        for (const w of where) {
-          const operator = (w.operator ?? "eq").toLowerCase();
-          if (w.field === "id" && operator === "eq") ids.push(toRecordId(table, w.value));
-          else if (
-            w.field === "id" &&
-            operator === "in" &&
-            Array.isArray(w.value) &&
-            w.value.length > 0
-          ) {
-            ids.push(...w.value.map((value) => toRecordId(table, value)));
-          } else rest.push(w);
+
+        for (const whereItem of where) {
+          const op = (whereItem.operator ?? "eq").toLowerCase();
+          const match =
+            whereItem.field === "id" &&
+            (op === "eq" ||
+              (op === "in" && Array.isArray(whereItem.value) && whereItem.value.length));
+
+          if (match) ids.push(...[whereItem.value].flat().map((val) => toRecordId(table, val)));
+          else rest.push(whereItem);
         }
-        if (!ids.length) return { target: new Table(table), rest };
-        return { target: ids.length === 1 ? ids[0]! : ids, rest };
+
+        return ids.length ? { target: ids.length === 1 ? ids[0]! : ids, rest } : fallback;
       };
+
       const customExpr = (toSQL: (ctx: { def: (value: unknown) => string }) => string): Expr =>
         ({ toSQL }) as Expr;
 
@@ -203,18 +214,13 @@ export const surrealAdapter = (
         }
         if (fieldAttributes?.references) {
           const refTable = fieldAttributes.references.model;
-          if (operator === "in" && Array.isArray(value)) {
-            value = value.map((entry) =>
-              normalizeReferenceInput(refTable, entry, { model, field: where.field, operator }),
-            );
-          } else if (operator !== "in") {
-            value = normalizeReferenceInput(refTable, value, {
-              model,
-              field: where.field,
-              operator,
-            });
-          }
+          const ctx = { model, field: where.field, operator };
+          value =
+            operator === "in" && Array.isArray(value)
+              ? value.map((val) => normalizeReferenceInput(refTable, val, ctx))
+              : normalizeReferenceInput(refTable, value, ctx);
         }
+
         const ident = escapeIdent(dbFieldName);
         switch (operator) {
           case "eq":
@@ -291,6 +297,7 @@ export const surrealAdapter = (
           return wrapQueryError(error, context);
         }
       };
+
       const queryOne = async <T>(query: BoundQuery, context: string): Promise<T | null> => {
         const rows = await queryMany<T>(query, context);
         return rows[0] ?? null;
@@ -329,28 +336,18 @@ export const surrealAdapter = (
           assertWritePayload(model, payload);
           const content = normalizeNullToNone(stripIdFromPayload(payload));
           const rawId = payload.id;
-          let query: BoundQuery;
-          if (rawId != null) {
-            query = new BoundQuery(`CREATE $rid CONTENT $data`, {
-              rid: toRecordId(tableName, rawId),
-              data: content,
-            });
-          } else {
-            const format = resolveIdFormat(tableName);
-            if (format === "ulid") {
-              query = new BoundQuery(`CREATE ${escapeIdent(tableName)}:ulid() CONTENT $data`, {
-                data: content,
-              });
-            } else if (format === "uuidv7") {
-              query = new BoundQuery(`CREATE ${escapeIdent(tableName)}:uuid() CONTENT $data`, {
-                data: content,
-              });
-            } else {
-              query = new BoundQuery(`CREATE ${escapeIdent(tableName)} CONTENT $data`, {
-                data: content,
-              });
-            }
-          }
+
+          const getTarget = () => {
+            if (rawId != null) return "$rid";
+            const fmt = resolveIdFormat(tableName);
+            const suffix = fmt === "ulid" ? ":ulid()" : fmt === "uuidv7" ? ":uuid()" : "";
+            return `${escapeIdent(tableName)}${suffix}`;
+          };
+
+          const query = new BoundQuery(`CREATE ${getTarget()} CONTENT $data`, {
+            rid: rawId != null ? toRecordId(tableName, rawId) : undefined,
+            data: content,
+          });
           const created = await queryOne<T>(query, `creating a record in "${tableName}"`);
           if (!created) throw adapterError(`Failed to create record in "${tableName}".`);
           return created;
@@ -500,32 +497,13 @@ export const surrealAdapter = (
     supportsBooleans: true,
     supportsNumericIds: false,
     disableIdGeneration: true,
-    customTransformInput: ({
-      field,
-      model,
-      fieldAttributes,
-      data,
-    }: {
-      field: string;
-      model: string;
-      fieldAttributes: { references?: { model: string } } | undefined;
-      data: unknown;
-    }) => {
-      if (!fieldAttributes?.references) return data;
-      return normalizeReferenceInput(fieldAttributes.references.model, data, { model, field });
-    },
-    customTransformOutput: ({
-      field,
-      data,
-      fieldAttributes,
-    }: {
-      field: string;
-      data: unknown;
-      fieldAttributes: { references?: { model: string } } | undefined;
-    }) => {
+    customTransformInput: ({ field, model, fieldAttributes, data }) =>
+      fieldAttributes?.references
+        ? normalizeReferenceInput(fieldAttributes.references.model, data, { model, field })
+        : data,
+    customTransformOutput: ({ field, data, fieldAttributes }) => {
       if (field === "id" || fieldAttributes?.references) return stripRecordPrefix(data);
-      if (data instanceof DateTime) return data.toDate();
-      return data;
+      return data instanceof DateTime ? data.toDate() : data;
     },
   };
 
