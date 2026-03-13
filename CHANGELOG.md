@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-13
+
+### ⚠ Breaking
+
+- Adapter id contract is now strict SurrealDB string record ids (`table:id`) for ID-bearing paths.
+- Bare ids (for example `abc123`) are no longer accepted for primary-id filters or reference-id filters/writes.
+- Adapter output for `id` and reference fields now remains full string record ids instead of stripping table prefixes.
+
 ### Changed
 
 - Switched package builds from `tsc` emit to `tsdown` ESM output.
@@ -15,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Split schema/migration helpers into a dedicated `@vxlx/surrealdb-better-auth/schema` entrypoint and kept the root entry focused on adapter runtime.
 - Adapter `createSchema` now lazy-loads the schema module so consumers importing only `surrealAdapter` avoid bundling schema helper implementation code.
 - Narrowed root adapter exports so only `surrealAdapter` is publicly exported from `@vxlx/surrealdb-better-auth`.
+- Removed legacy UUID literal/prefix normalization logic in favor of strict `StringRecordId`-validated parsing.
+- `recordIdFormat` now only controls create-time record target strategy when no explicit id is provided.
+- Updated JWT payload handling/tests to use full record-id strings directly for `id`/`sub`.
+- Realigned integration and unit tests around full string record-id behavior and strict bare-id rejection.
 
 ## [0.5.1] - 2026-03-12
 

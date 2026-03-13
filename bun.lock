@@ -5,6 +5,8 @@
     "": {
       "name": "@vxlx/surrealdb-better-auth",
       "devDependencies": {
+        "@better-auth/core": "^1.5.4",
+        "@better-auth/utils": "^0.3.1",
         "@types/bun": "^1.3.10",
         "@types/node": "^25.4.0",
         "@vitest/browser-playwright": "^4.0.18",
@@ -19,7 +21,8 @@
         "vitest": "^4.0.18",
       },
       "peerDependencies": {
-        "better-auth": "^1.5.4",
+        "@better-auth/core": "^1.5.4",
+        "@better-auth/utils": "^0.3.1",
         "surrealdb": "^2.0.2",
       },
     },

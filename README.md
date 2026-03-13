@@ -2,7 +2,7 @@
 
 SurrealDB-first [Better Auth](https://www.better-auth.com/) adapter built for the SurrealDB JavaScript SDK v2.
 
-It uses SurrealDB record ids and record links internally, while keeping plain Better Auth ids at the adapter boundary.
+It uses SurrealDB string record ids (`table:id`) and record links as the adapter contract.
 
 - npm: [`@vxlx/surrealdb-better-auth`](https://www.npmjs.com/package/@vxlx/surrealdb-better-auth)
 - repository: [vxlx-platform/surrealdb-better-auth](https://github.com/vxlx-platform/surrealdb-better-auth)
@@ -12,7 +12,7 @@ It uses SurrealDB record ids and record links internally, while keeping plain Be
 If you're using Better Auth with the SurrealDB JavaScript SDK v2 client, this adapter gives you a SurrealDB-native integration layer instead of forcing a SQL-shaped adapter model onto SurrealDB.
 
 - SurrealDB record-id-first identity model
-- Plain Better Auth ids at the adapter boundary
+- Full string record ids at the adapter boundary
 - Automatic `RecordId` handling for references
 - Better Auth adapter factory and transaction support
 - Built for the SurrealDB JavaScript SDK v2 on modern SurrealDB deployments
@@ -22,22 +22,22 @@ If you're using Better Auth with the SurrealDB JavaScript SDK v2 client, this ad
 Compared with more generic or SQL-shaped SurrealDB adapters, this adapter is opinionated about staying close to both SurrealDB and Better Auth.
 
 - Uses the SurrealDB record id as the real primary identity instead of treating `id` as just another stored column.
-- Normalizes ids back to plain Better Auth-friendly values at the adapter boundary, so consumers do not have to work with `table:id` values everywhere.
-- Converts referenced Better Auth ids into SurrealDB `RecordId` links automatically, while rejecting explicit wrong-table record ids early.
+- Keeps ids as full SurrealDB string record ids (`table:id`) in adapter output.
+- Converts accepted id inputs (`RecordId`, `StringRecordId`, or `table:id`) into SurrealDB `RecordId` links, while rejecting bare ids and wrong-table record ids early.
 - Uses database-side sorting, pagination, and filtering instead of falling back to JavaScript-side query shaping.
 - Rejects unsupported query operators explicitly instead of silently degrading behavior.
 - Supports Better Auth transactions through SurrealDB SDK v2 session transactions.
 - Generates SurrealDB-oriented schema with `record<...>` reference fields instead of modeling auth tables like a relational schema first.
 - Shapes common SurrealDB failures into clearer adapter-scoped errors, including unique constraint and field coercion failures.
 
-In short: this adapter is designed to let Better Auth speak in plain ids and adapter semantics, while letting SurrealDB keep its native record-id and record-link model underneath.
+In short: this adapter keeps Better Auth and SurrealDB aligned on one id contract: string record ids.
 
 ## Features
 
 - SurrealDB-first Better Auth adapter built around record ids and record links
 - Full CRUD support (`create`, `findOne`, `findMany`, `count`, `update`, `updateMany`, `delete`, `deleteMany`)
 - Better Auth transaction support via `adapter.transaction(...)`
-- Automatic id normalization between Better Auth ids and SurrealDB record ids
+- Strict record-id input/output contract (`table:id`)
 - Explicit query/operator validation and adapter-scoped error shaping
 - Configurable record id generation strategy:
   - `native` (default)
@@ -83,7 +83,7 @@ Unsupported operators are rejected explicitly instead of silently falling back t
 
 For the `in` operator, Better Auth validates that the value is an array before the adapter runs.
 
-When you filter by related records, the adapter automatically converts plain Better Auth ids into SurrealDB `RecordId`s for you. If you pass an explicit record id, it must match the referenced table.
+When you filter by related records, the adapter accepts `RecordId`, `StringRecordId`, and `table:id` strings. Bare ids are rejected.
 
 ## Installation
 
@@ -160,6 +160,8 @@ surrealAdapter(db, {
 });
 ```
 
+`recordIdFormat` affects how new records are created when no explicit id is provided. It does not rewrite explicit ids passed to adapter operations.
+
 ### `transaction`
 
 Controls how the adapter handles Better Auth transaction hooks:
@@ -174,14 +176,15 @@ surrealAdapter(db, { transaction: "auto" });
 
 ## ID / Reference Behavior
 
-- Primary ids are represented as SurrealDB record ids (e.g. `user:abc123`) internally.
-- Adapter output normalizes ids to plain components (`abc123`) for Better Auth.
-- Reference fields are transformed to `RecordId` values on writes/filters and normalized back on reads.
-- Plain Better Auth ids such as `abc123` are accepted for reference fields and converted to the expected SurrealDB record id automatically.
-- Explicit record ids such as `user:abc123` are accepted for reference fields when they match the referenced table.
-- Explicit wrong-table record ids such as `account:abc123` for a `userId` reference are rejected early.
+- Adapter outputs always return full string record ids (for `id` and reference fields), for example `user:abc123`.
+- ID-bearing inputs must be one of:
+  - `RecordId`
+  - `StringRecordId`
+  - string record id in `table:id` format
+- Bare ids like `abc123` are rejected for primary-id and reference-id paths.
+- Reference ids must match the referenced table (for example `userId` must be a `user:*` record id).
 
-This lets Better Auth continue working with plain string ids while the SurrealDB JavaScript SDK v2 keeps native record semantics under the hood.
+This keeps id behavior explicit and consistent across Better Auth and SurrealDB.
 
 ## Error Handling
 
@@ -509,10 +512,10 @@ npm run test
 
 Note: Integration tests require a local SurrealDB instance reachable at `ws://localhost:8000/rpc`, accessed through the current SurrealDB JavaScript SDK v2 client and credentials used in the test helpers.
 
-Test DB scope can be configured with:
+Live test DB scope can be configured with:
 
-- `SURREALDB_TEST_NAMESPACE` (default: `main`)
-- `SURREALDB_TEST_DATABASE` (default: `main`)
+- `SURREALDB_TEST_NAMESPACE` (default: `test`)
+- `SURREALDB_TEST_DATABASE` (default: `test`)
 - `SURREALDB_TEST_ISOLATE=1` to append worker ids for parallel isolation
 
 ## TODO
