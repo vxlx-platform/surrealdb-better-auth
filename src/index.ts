@@ -106,6 +106,11 @@ type QueryErrorClassification =
   | { kind: "unique" }
   | { kind: "none" };
 
+type ParsedRecordIdLike = {
+  table: string | null;
+  idComponent: string;
+};
+
 /**
  * Creates a Better Auth database adapter backed by SurrealDB.
  *
@@ -223,6 +228,42 @@ export const surrealAdapter = (
     return m ? m[2]! : value;
   };
 
+  const parseRecordIdString = (raw: string): ParsedRecordIdLike => {
+    const separatorIndex = raw.indexOf(":");
+    const table = separatorIndex > 0 ? raw.slice(0, separatorIndex) : null;
+    const match = raw.match(RECORD_ID_SUFFIX_RE);
+    const idPart = match ? (match[1] ?? match[2] ?? raw) : raw;
+
+    return {
+      table,
+      idComponent: normalizeUuidLiteral(idPart),
+    };
+  };
+
+  const parseRecordIdLike = (value: unknown): ParsedRecordIdLike | null => {
+    if (value instanceof RecordId) {
+      const idPart = value.id;
+      return {
+        table: value.table.name,
+        idComponent: idPart instanceof Uuid ? idPart.toString() : String(idPart),
+      };
+    }
+
+    if (value instanceof StringRecordId) {
+      return parseRecordIdString(String(value));
+    }
+
+    if (typeof value === "string") {
+      return parseRecordIdString(value);
+    }
+
+    if (typeof value === "number" || typeof value === "bigint") {
+      return { table: null, idComponent: String(value) };
+    }
+
+    return null;
+  };
+
   /**
    * Extracts the logical id component from values that might be:
    * - plain id ("abc123")
@@ -234,13 +275,9 @@ export const surrealAdapter = (
    * @returns The extracted id component.
    */
   const toIdComponent = (value: unknown): string => {
-    if (typeof value === "string") {
-      const match = value.match(RECORD_ID_SUFFIX_RE);
-      const idPart = match ? (match[1] ?? match[2] ?? value) : value;
-      return normalizeUuidLiteral(idPart);
-    }
-    if (typeof value === "number" || typeof value === "bigint") {
-      return String(value);
+    const parsed = parseRecordIdLike(value);
+    if (parsed) {
+      return parsed.idComponent;
     }
     throw new TypeError(`Invalid id value: ${Object.prototype.toString.call(value)}`);
   };
@@ -271,17 +308,6 @@ export const surrealAdapter = (
     return new RecordId(tableName, toRecordIdPart(tableName, idComponent));
   };
 
-  const extractRecordTable = (value: unknown): string | null => {
-    if (value instanceof RecordId || value instanceof StringRecordId || typeof value === "string") {
-      const raw = String(value);
-      const separatorIndex = raw.indexOf(":");
-      if (separatorIndex > 0) {
-        return raw.slice(0, separatorIndex);
-      }
-    }
-    return null;
-  };
-
   const normalizeReferenceInput = (
     refTable: string,
     value: unknown,
@@ -291,8 +317,7 @@ export const surrealAdapter = (
       return value;
     }
 
-    const assertReferenceTable = (incoming: unknown) => {
-      const incomingTable = extractRecordTable(incoming);
+    const assertReferenceTable = (incomingTable: string | null) => {
       if (incomingTable && incomingTable !== refTable) {
         throw adapterError(
           `Reference field "${context.field}" on model "${context.model}" expects a "${refTable}" record id, ` +
@@ -302,18 +327,14 @@ export const surrealAdapter = (
     };
 
     if (value instanceof RecordId) {
-      assertReferenceTable(value);
+      assertReferenceTable(value.table.name);
       return value;
     }
 
-    if (value instanceof StringRecordId) {
-      assertReferenceTable(value);
-      return new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(String(value))));
-    }
-
-    if (typeof value === "string" || typeof value === "number" || typeof value === "bigint") {
-      assertReferenceTable(value);
-      return new RecordId(refTable, toRecordIdPart(refTable, toIdComponent(value)));
+    const parsed = parseRecordIdLike(value);
+    if (parsed) {
+      assertReferenceTable(parsed.table);
+      return new RecordId(refTable, toRecordIdPart(refTable, parsed.idComponent));
     }
 
     throw adapterError(
@@ -335,22 +356,8 @@ export const surrealAdapter = (
    * @returns The extracted logical id, or the original value if it is not a record id.
    */
   const stripRecordPrefix = (value: unknown): unknown => {
-    if (value instanceof RecordId) {
-      const v = value.id;
-      return v instanceof Uuid ? v.toString() : String(v);
-    }
-
-    if (value instanceof StringRecordId) {
-      const raw = String(value);
-      const match = raw.match(RECORD_ID_SUFFIX_RE);
-      const idPart = match ? (match[1] ?? match[2] ?? raw) : raw;
-      return normalizeUuidLiteral(idPart);
-    }
-
-    if (typeof value === "string") {
-      const match = value.match(RECORD_ID_SUFFIX_RE);
-      const idPart = match ? (match[1] ?? match[2] ?? value) : value;
-      return normalizeUuidLiteral(idPart);
+    if (value instanceof RecordId || value instanceof StringRecordId || typeof value === "string") {
+      return parseRecordIdLike(value)?.idComponent ?? value;
     }
 
     return value;
@@ -929,141 +936,174 @@ export const surrealAdapter = (
 
   let lazyOptions: BetterAuthOptions | null = null;
 
+  const adapterConfigBase: Omit<AdapterFactoryOptions["config"], "transaction"> = {
+    adapterId: "surrealdb-adapter",
+    adapterName: "SurrealDB Adapter",
+    usePlural: config?.usePlural ?? false,
+    debugLogs: config?.debugLogs ?? false,
+    supportsJSON: true,
+    supportsDates: true,
+    supportsBooleans: true,
+    supportsNumericIds: false,
+
+    /**
+     * Better Auth should not generate ids itself.
+     * SurrealDB record ids act as the record-address.
+     *
+     * NOTE: If Better Auth provides an `id`, we still honor it as the record key component.
+     */
+    disableIdGeneration: true,
+
+    /**
+     * Transforms incoming Better Auth values before they are written to SurrealDB.
+     *
+     * Reference fields are converted from Better Auth string ids into SurrealDB
+     * `RecordId` instances so they can be stored as `record<...>` links.
+     */
+    customTransformInput: ({
+      field,
+      model,
+      fieldAttributes,
+      data,
+    }: {
+      field: string;
+      model: string;
+      fieldAttributes: { references?: { model: string } } | undefined;
+      data: unknown;
+    }) => {
+      if (fieldAttributes?.references) {
+        const refTable = fieldAttributes.references.model;
+        return normalizeReferenceInput(refTable, data, { model, field });
+      }
+      return data;
+    },
+
+    /**
+     * Transforms outgoing SurrealDB values into Better Auth friendly values.
+     *
+     * Primary ids and reference fields are normalized from SurrealDB record ids
+     * back into plain Better Auth id strings.
+     */
+    customTransformOutput: ({
+      field,
+      data,
+      fieldAttributes,
+    }: {
+      field: string;
+      data: unknown;
+      fieldAttributes: { references?: { model: string } } | undefined;
+    }) => {
+      if (field === "id" || fieldAttributes?.references) {
+        return stripRecordPrefix(data);
+      }
+      if (data instanceof DateTime) {
+        return data.toDate();
+      }
+      return data;
+    },
+  };
+
+  type TransactionExecutor = Exclude<
+    NonNullable<AdapterFactoryOptions["config"]["transaction"]>,
+    false
+  >;
+
+  const createRuntimeAdapter = (
+    queryClient: Pick<SurrealQueryable, "query">,
+    transaction: AdapterFactoryOptions["config"]["transaction"],
+  ): DBTransactionAdapter =>
+    createAdapterFactory({
+      config: { ...adapterConfigBase, transaction },
+      adapter: createCustomAdapter(queryClient),
+    })(lazyOptions!);
+
+  let noTxRuntimeAdapter: DBTransactionAdapter | null = null;
+  const getNoTxRuntimeAdapter = (): DBTransactionAdapter => {
+    if (!noTxRuntimeAdapter) {
+      noTxRuntimeAdapter = createRuntimeAdapter(db, false);
+    }
+    return noTxRuntimeAdapter;
+  };
+
+  const runWithoutDatabaseTransaction = <R>(
+    callback: (trx: DBTransactionAdapter) => Promise<R>,
+  ): Promise<R> => callback(getNoTxRuntimeAdapter());
+
+  let transactionExecutor: AdapterFactoryOptions["config"]["transaction"] = false;
+  const shouldEnableTransactionExecutor =
+    transactionMode !== false &&
+    !(transactionMode === "auto" && (!hasForkSessionMethod || initialTransactionSupport === false));
+
+  if (shouldEnableTransactionExecutor) {
+    const executeWithSessionTransaction = async <R>(
+      session: SurrealSession,
+      callback: (trx: DBTransactionAdapter) => Promise<R>,
+    ): Promise<R> => {
+      const transaction = await session.beginTransaction();
+      const adapter = createRuntimeAdapter(transaction, transactionExecutor);
+
+      try {
+        const result = await callback(adapter);
+        await transaction.commit();
+        return result;
+      } catch (error) {
+        try {
+          await transaction.cancel();
+        } catch {
+          // Preserve the original error when rollback also fails.
+        }
+        throw error;
+      }
+    };
+
+    const transactionHandler: TransactionExecutor = async <R>(
+      callback: (trx: DBTransactionAdapter) => Promise<R>,
+    ): Promise<R> => {
+      if (!hasForkSessionMethod) {
+        if (transactionMode === true) {
+          throw adapterError(
+            "Transactions were explicitly enabled, but this SurrealDB client does not expose forkSession().",
+          );
+        }
+        return runWithoutDatabaseTransaction(callback);
+      }
+
+      if (runtimeTransactionDisabled && transactionMode !== true) {
+        return runWithoutDatabaseTransaction(callback);
+      }
+
+      let session: SurrealSession | null = null;
+
+      try {
+        session = await db.forkSession();
+      } catch (error) {
+        if (isUnsupportedSessionsFeatureError(error) && transactionMode !== true) {
+          runtimeTransactionDisabled = true;
+          return runWithoutDatabaseTransaction(callback);
+        }
+        throw adapterError("Failed to initialize a SurrealDB transaction session.", error);
+      }
+
+      try {
+        return await executeWithSessionTransaction(session, callback);
+      } catch (error) {
+        if (isUnsupportedSessionsFeatureError(error) && transactionMode !== true) {
+          runtimeTransactionDisabled = true;
+          return runWithoutDatabaseTransaction(callback);
+        }
+        throw error;
+      } finally {
+        await session.closeSession();
+      }
+    };
+
+    transactionExecutor = transactionHandler;
+  }
+
   const adapterFactoryOptions: AdapterFactoryOptions = {
     config: {
-      adapterId: "surrealdb-adapter",
-      adapterName: "SurrealDB Adapter",
-      usePlural: config?.usePlural ?? false,
-      debugLogs: config?.debugLogs ?? false,
-      supportsJSON: true,
-      supportsDates: true,
-      supportsBooleans: true,
-      supportsNumericIds: false,
-
-      /**
-       * Better Auth should not generate ids itself.
-       * SurrealDB record ids act as the record-address.
-       *
-       * NOTE: If Better Auth provides an `id`, we still honor it as the record key component.
-       */
-      disableIdGeneration: true,
-
-      /**
-       * Transforms incoming Better Auth values before they are written to SurrealDB.
-       *
-       * Reference fields are converted from Better Auth string ids into SurrealDB
-       * `RecordId` instances so they can be stored as `record<...>` links.
-       */
-      customTransformInput: ({
-        field,
-        model,
-        fieldAttributes,
-        data,
-      }: {
-        field: string;
-        model: string;
-        fieldAttributes: { references?: { model: string } } | undefined;
-        data: unknown;
-      }) => {
-        if (fieldAttributes?.references) {
-          const refTable = fieldAttributes.references.model;
-          return normalizeReferenceInput(refTable, data, { model, field });
-        }
-        return data;
-      },
-
-      /**
-       * Transforms outgoing SurrealDB values into Better Auth friendly values.
-       *
-       * Primary ids and reference fields are normalized from SurrealDB record ids
-       * back into plain Better Auth id strings.
-       */
-      customTransformOutput: ({
-        field,
-        data,
-        fieldAttributes,
-      }: {
-        field: string;
-        data: unknown;
-        fieldAttributes: { references?: { model: string } } | undefined;
-      }) => {
-        if (field === "id" || fieldAttributes?.references) {
-          return stripRecordPrefix(data);
-        }
-        if (data instanceof DateTime) {
-          return data.toDate();
-        }
-        return data;
-      },
-      transaction:
-        transactionMode === false ||
-        (transactionMode === "auto" &&
-          (!hasForkSessionMethod || initialTransactionSupport === false))
-          ? false
-          : async <R>(callback: (trx: DBTransactionAdapter) => Promise<R>) => {
-              const runWithoutDatabaseTransaction = async () => {
-                const noTxAdapter = createAdapterFactory({
-                  config: { ...adapterFactoryOptions.config, transaction: false },
-                  adapter: createCustomAdapter(db),
-                })(lazyOptions!);
-
-                return callback(noTxAdapter);
-              };
-
-              if (!hasForkSessionMethod) {
-                if (transactionMode === true) {
-                  throw adapterError(
-                    "Transactions were explicitly enabled, but this SurrealDB client does not expose forkSession().",
-                  );
-                }
-                return runWithoutDatabaseTransaction();
-              }
-
-              if (runtimeTransactionDisabled && transactionMode !== true) {
-                return runWithoutDatabaseTransaction();
-              }
-
-              let session: SurrealSession | null = null;
-
-              try {
-                session = await db.forkSession();
-              } catch (error) {
-                if (isUnsupportedSessionsFeatureError(error) && transactionMode !== true) {
-                  runtimeTransactionDisabled = true;
-                  return runWithoutDatabaseTransaction();
-                }
-                throw adapterError("Failed to initialize a SurrealDB transaction session.", error);
-              }
-
-              try {
-                const transaction = await session.beginTransaction();
-                const adapter = createAdapterFactory({
-                  config: adapterFactoryOptions.config,
-                  adapter: createCustomAdapter(transaction),
-                })(lazyOptions!);
-
-                try {
-                  const result = await callback(adapter);
-                  await transaction.commit();
-                  return result;
-                } catch (error) {
-                  try {
-                    await transaction.cancel();
-                  } catch {
-                    // Preserve the original error when rollback also fails.
-                  }
-                  throw error;
-                }
-              } catch (error) {
-                if (isUnsupportedSessionsFeatureError(error) && transactionMode !== true) {
-                  runtimeTransactionDisabled = true;
-                  return runWithoutDatabaseTransaction();
-                }
-                throw error;
-              } finally {
-                await session.closeSession();
-              }
-            },
+      ...adapterConfigBase,
+      transaction: transactionExecutor,
     },
     adapter: createCustomAdapter(db),
   };
