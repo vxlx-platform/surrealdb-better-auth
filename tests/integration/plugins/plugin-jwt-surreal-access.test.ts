@@ -38,7 +38,7 @@ describe("Plugin - JWT SurrealDB Access", () => {
     namespace = getScopedDbName(env.namespace);
     database = getScopedDbName(env.database);
 
-    jwksPath = `/.well-known/jwks-${Date.now()}.json`;
+    jwksPath = `/.well-known.json`;
 
     const built = await setupIntegrationAdapter(
       {
@@ -142,9 +142,9 @@ DEFINE ACCESS OVERWRITE ${accessName}
       }),
     });
 
-    const signUp = (await expectOkJson(signUpResponse, "Better Auth sign-up for JWT access")) as {
+    const signUp = await expectOkJson<{
       user: { id: string; email: string };
-    };
+    }>(signUpResponse, "Better Auth sign-up for JWT access");
 
     const cookieHeader = getCookieHeader(signUpResponse);
     expect(cookieHeader).not.toBe("");
@@ -156,9 +156,9 @@ DEFINE ACCESS OVERWRITE ${accessName}
       },
     });
 
-    const { token } = (await expectOkJson(tokenResponse, "Better Auth token endpoint")) as {
+    const { token } = await expectOkJson<{
       token: string;
-    };
+    }>(tokenResponse, "Better Auth token endpoint");
     expect(typeof token).toBe("string");
     expect(token.split(".")).toHaveLength(3);
 

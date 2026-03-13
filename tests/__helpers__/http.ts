@@ -28,11 +28,11 @@ export function getCookieHeader(response: Response): string {
   return singleCookie ? (singleCookie.split(";")[0] ?? "") : "";
 }
 
-export async function expectOkJson(response: Response, context: string) {
+export async function expectOkJson<T>(response: Response, context: string): Promise<T> {
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`${context} failed with ${response.status} ${response.statusText}: ${body}`);
   }
 
-  return response.json();
+  return (await response.json()) as T;
 }
