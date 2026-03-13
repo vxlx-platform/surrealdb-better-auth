@@ -111,7 +111,10 @@ export const createTransactionExecutor = ({
       session = await db.forkSession();
       return await executeWithSessionTransaction(session, callback);
     } catch (error) {
-      return onUnsupported(error, !session ? "Failed to initialize a SurrealDB transaction session." : undefined);
+      return onUnsupported(
+        error,
+        !session ? "Failed to initialize a SurrealDB transaction session." : undefined,
+      );
     } finally {
       await session?.closeSession();
     }

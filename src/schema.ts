@@ -64,7 +64,7 @@ export const generateSurqlSchema = async (options: GenerateSurqlSchemaOptions) =
 
     if (apiCfg && apiModels.has(table.modelName)) apiTableNames.push(rawTableName);
 
-    for (const [fieldKey, field] of Object.entries(table.fields).filter(([_, f]) => f)) {
+    for (const [fieldKey, field] of Object.entries(table.fields).filter(([_, field]) => field)) {
       const dbFieldName = field.fieldName || fieldKey;
       if (dbFieldName === "id") continue;
 

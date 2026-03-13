@@ -30,7 +30,8 @@ const parseRecordIdLike = (val: unknown): ParsedRecordIdLike | null => {
       table: val.table.name,
       idComponent: val.id instanceof Uuid ? val.id.toString() : String(val.id),
     };
-  if (val instanceof StringRecordId || typeof val === "string") return parseRecordIdString(String(val));
+  if (val instanceof StringRecordId || typeof val === "string")
+    return parseRecordIdString(String(val));
   if (typeof val === "number" || typeof val === "bigint")
     return { table: null, idComponent: String(val) };
   return null;
