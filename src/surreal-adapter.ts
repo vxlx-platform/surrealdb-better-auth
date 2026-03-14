@@ -9,7 +9,7 @@ import type {
 } from "@better-auth/core/db/adapter";
 import { createAdapterFactory } from "@better-auth/core/db/adapter";
 import type { BetterAuthDBSchema, DBFieldAttribute } from "@better-auth/core/db";
-import type { Expr, Surreal } from "surrealdb";
+import type { BoundQuery, Expr, Surreal } from "surrealdb";
 import {
   DateTime,
   Features,
@@ -44,6 +44,7 @@ export interface SurrealAdapterConfig {
   transaction?: boolean;
   recordIdFormat?: RecordIdFormatResolver;
   apiEndpoints?: boolean | SchemaApiEndpointsConfig;
+  defineAccess?: () => BoundQuery<unknown[]>;
 }
 
 export interface SchemaApiEndpointsConfig {
@@ -67,7 +68,10 @@ type AdapterSchema = Record<
 >;
 
 type ModelFieldLookup = Map<string, string>;
-type TransactionRunner = Exclude<NonNullable<AdapterFactoryOptions["config"]["transaction"]>, false>;
+type TransactionRunner = Exclude<
+  NonNullable<AdapterFactoryOptions["config"]["transaction"]>,
+  false
+>;
 
 /**
  * Better Auth adapter for SurrealDB.
@@ -380,7 +384,9 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         ? `record<${escapeIdent(getModelName(field.references.model))}>`
         : resolveSchemaType(modelName, dbFieldName, field.type);
       const requiredType = field.required ? fieldType : `option<${fieldType}>`;
-      lines.push(`DEFINE FIELD OVERWRITE ${resolvedField} ON TABLE ${tableName} TYPE ${requiredType};`);
+      lines.push(
+        `DEFINE FIELD OVERWRITE ${resolvedField} ON TABLE ${tableName} TYPE ${requiredType};`,
+      );
 
       if (field.unique) emitUniqueIndex(tableName, resolvedField);
     };
@@ -433,6 +439,26 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       for (const tableName of apiTables) {
         emitApiEndpoint(tableName);
       }
+    }
+
+    const renderAccessStatement = () => {
+      if (typeof config.defineAccess === "function") {
+        const bound = config.defineAccess();
+        if (Object.keys(bound.bindings).length > 0) {
+          const placeholders = Object.keys(bound.bindings).map((key) => `$${key}`);
+          throw adapterError(
+            `defineAccess must not include bindings in schema generation. Use static surql or inline dynamic values with raw(...). Found: ${placeholders.join(", ")}.`,
+          );
+        }
+        const statement = bound.query.trim();
+        return statement.length > 0 ? statement : null;
+      }
+      return null;
+    };
+
+    const accessStatement = renderAccessStatement();
+    if (accessStatement) {
+      lines.push(accessStatement.endsWith(";") ? accessStatement : `${accessStatement};`, "");
     }
 
     const suggestedPath = file ? file.replace(/\.[^/.]+$/, ".surql") : ".better-auth/schema.surql";
@@ -489,18 +515,12 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       getFieldName,
       getModelName,
     }: Parameters<NonNullable<AdapterFactoryOptions["adapter"]>>[0]) => {
-      const queryOne = async <T>(
-        query: string,
-        bindings: Record<string, unknown>,
-      ) => {
+      const queryOne = async <T>(query: string, bindings: Record<string, unknown>) => {
         const result = await db.query<QueryRows<T>>(query, bindings);
         return toFirstRow<T>(result);
       };
 
-      const queryMany = async <T>(
-        query: string,
-        bindings: Record<string, unknown>,
-      ) => {
+      const queryMany = async <T>(query: string, bindings: Record<string, unknown>) => {
         const result = await db.query<QueryRows<T>>(query, bindings);
         return toResultRows<T>(result);
       };
@@ -681,7 +701,9 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         }): Promise<T | null> {
           const target = await resolveSingleRecordId(model, where);
           if (!target) return null;
-          const updateData = omitUndefinedFields(toObjectRecord(update, `update payload for "${model}"`));
+          const updateData = omitUndefinedFields(
+            toObjectRecord(update, `update payload for "${model}"`),
+          );
           const query = "UPDATE $target MERGE $update RETURN AFTER;";
           return await queryOne<T>(query, {
             target,
@@ -737,7 +759,13 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           return countBefore;
         },
 
-        async createSchema({ file, tables }: { file?: string | undefined; tables: BetterAuthDBSchema }) {
+        async createSchema({
+          file,
+          tables,
+        }: {
+          file?: string | undefined;
+          tables: BetterAuthDBSchema;
+        }) {
           return generateSchemaCode({
             tables,
             getFieldName,

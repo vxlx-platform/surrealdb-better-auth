@@ -129,12 +129,23 @@ The adapter accepts the v2 `Surreal` client directly and uses SDK-native types s
 
 ```ts
 import { surrealAdapter } from "@vxlx/surrealdb-better-auth";
+import { surql } from "surrealdb";
 
 const config = {
   usePlural: false,
   debugLogs: false,
   recordIdFormat: "native", // "native" | "ulid" | "uuidv7" | (tableName) => ...
-  transaction: "auto", // "auto" | true | false
+  transaction: true, // default behavior; set false to disable
+  defineAccess: () => surql`
+    DEFINE ACCESS OVERWRITE better_auth_user ON DATABASE
+      TYPE RECORD
+      WITH JWT URL "http://127.0.0.1:3000/api/auth/.well-known/jwks.json"
+      AUTHENTICATE {
+        IF $auth.id { RETURN $auth.id }
+        ELSE IF $token.email { RETURN (SELECT VALUE id FROM user WHERE email = $token.email LIMIT 1)[0] }
+      }
+      DURATION FOR TOKEN 1h, FOR SESSION 24h;
+  `,
 } as const;
 
 const adapter = surrealAdapter(db, config);
@@ -166,13 +177,41 @@ surrealAdapter(db, {
 
 Controls how the adapter handles Better Auth transaction hooks:
 
-- `"auto"` (default): use SDK session transactions when supported by the connected SurrealDB engine, otherwise fallback to Better Auth's non-transaction path.
-- `true`: require session transactions; throw if the engine does not support sessions/transactions.
-- `false`: always disable database-backed transactions.
+- `true`/unset (default): use SDK session transactions when supported by the connected SurrealDB engine, otherwise fallback to Better Auth's non-transaction path.
+- `false`: disable database-backed transactions.
 
 ```ts
-surrealAdapter(db, { transaction: "auto" });
+surrealAdapter(db, { transaction: false });
 ```
+
+### `defineAccess`
+
+Use `defineAccess` when you need full control over emitted `DEFINE ACCESS` SurQL.
+
+```ts
+import { surql } from "surrealdb";
+
+surrealAdapter(db, {
+  defineAccess: () => surql`
+    DEFINE ACCESS OVERWRITE better_auth_user ON DATABASE
+      TYPE RECORD
+      WITH JWT URL "http://127.0.0.1:3000/api/auth/.well-known/jwks.json"
+      AUTHENTICATE {
+        IF $auth.id { RETURN $auth.id }
+        ELSE IF $token.email { RETURN (SELECT VALUE id FROM user WHERE email = $token.email LIMIT 1)[0] }
+      }
+      DURATION FOR TOKEN 1h, FOR SESSION 24h;
+  `,
+});
+```
+
+Behavior:
+
+- If `defineAccess` is set, `createSchema` emits that statement.
+- If `defineAccess` is omitted, no `DEFINE ACCESS` statement is emitted.
+- `defineAccess` must return a SurrealDB `BoundQuery` (for example via `surql\`...\``).
+- `defineAccess` queries must not contain bindings in schema generation.
+  For dynamic values, inline them with `raw(...)` instead of `${value}` interpolation.
 
 ## ID / Reference Behavior
 
@@ -423,7 +462,12 @@ If `SURREALDB_ACCESS` is not set, the example server emits a more generic Better
 
 ## JWT Auth with SurrealDB Record Access
 
-If you want SurrealDB to accept Better Auth JWTs directly, define a record access method that trusts your Better Auth JWKS endpoint:
+If you want SurrealDB to accept Better Auth JWTs directly, define a record access method that trusts your Better Auth JWKS endpoint.
+
+You can either:
+
+- emit it from `createSchema` via `defineAccess`, or
+- define it manually:
 
 ```surql
 DEFINE ACCESS better_auth_user
