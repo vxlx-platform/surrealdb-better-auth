@@ -357,7 +357,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     const emitUniqueIndex = (tableName: string, resolvedField: string) => {
       const indexName = `${tableName.replace(/`/g, "")}${resolvedField.replace(/`/g, "")}_idx`;
       lines.push(
-        `DEFINE INDEX ${escapeIdent(indexName)} ON ${tableName} COLUMNS ${resolvedField} UNIQUE;`,
+        `DEFINE INDEX OVERWRITE ${escapeIdent(indexName)} ON TABLE ${tableName} COLUMNS ${resolvedField} UNIQUE;`,
       );
     };
 
@@ -380,7 +380,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         ? `record<${escapeIdent(getModelName(field.references.model))}>`
         : resolveSchemaType(modelName, dbFieldName, field.type);
       const requiredType = field.required ? fieldType : `option<${fieldType}>`;
-      lines.push(`DEFINE FIELD ${resolvedField} ON ${tableName} TYPE ${requiredType};`);
+      lines.push(`DEFINE FIELD OVERWRITE ${resolvedField} ON TABLE ${tableName} TYPE ${requiredType};`);
 
       if (field.unique) emitUniqueIndex(tableName, resolvedField);
     };
@@ -388,7 +388,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     const emitTableDefinition = (table: SchemaTable) => {
       const modelName = table.modelName;
       const tableName = escapeIdent(getModelName(modelName));
-      lines.push(`DEFINE TABLE ${tableName} SCHEMAFULL;`);
+      lines.push(`DEFINE TABLE OVERWRITE ${tableName} SCHEMAFULL;`);
 
       if (apiCfg && apiModels.has(modelName)) {
         apiTables.push(getModelName(modelName));

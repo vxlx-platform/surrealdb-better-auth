@@ -4,11 +4,35 @@ import type { BetterAuthOptions } from "better-auth";
 import { Surreal } from "surrealdb";
 
 import { surrealAdapter } from "../../src";
-import { createTestDbConnection, hasLiveSurrealEndpoint, truncateAuthTables } from "./db";
+import { createTestDbConnection, truncateAuthTables } from "./db";
 
-export { hasLiveSurrealEndpoint };
+type SetupAuthContextOptions = {
+  plugins?: BetterAuthOptions["plugins"];
+};
 
-const createAuth = (db: Surreal) =>
+const extractDefinedTables = (schemaCode: string): string[] => {
+  const regex = /\bDEFINE\s+TABLE(?:\s+OVERWRITE)?\s+([A-Za-z0-9_]+)/gi;
+  const tables = new Set<string>();
+  for (const match of schemaCode.matchAll(regex)) {
+    const table = match[1];
+    if (table) tables.add(table);
+  }
+  return [...tables];
+};
+
+const recreateDefinedTables = async (db: Surreal, schemaCode: string) => {
+  const tables = extractDefinedTables(schemaCode);
+  for (const table of tables) {
+    try {
+      await db.query(`REMOVE TABLE ${table};`);
+    } catch {
+      // Ignore if table does not exist yet.
+    }
+  }
+  await db.query(schemaCode);
+};
+
+const createAuth = (db: Surreal, options?: SetupAuthContextOptions) =>
   betterAuth({
     baseURL: "http://127.0.0.1:3000",
     secret: "01234567890123456789012345678901",
@@ -19,11 +43,11 @@ const createAuth = (db: Surreal) =>
         verify: async ({ hash, password }) => hash === password,
       },
     },
+    ...(options?.plugins ? { plugins: options.plugins } : {}),
     database: surrealAdapter(db),
   });
 
 type Auth = ReturnType<typeof createAuth>;
-
 export type AuthContext = {
   db: Surreal;
   auth: Auth;
@@ -34,20 +58,20 @@ export type AuthContext = {
   closeDb: () => Promise<true>;
 };
 
-export async function setupAuthContext(): Promise<AuthContext> {
+export async function setupAuthContext(options?: SetupAuthContextOptions): Promise<AuthContext> {
   const { db, closeDb, namespace, database } = await createTestDbConnection();
 
-  const auth = createAuth(db);
+  const auth = createAuth(db, options);
 
-  const options = auth.options as BetterAuthOptions;
-  const adapterFactory = options.database as DBAdapterInstance;
-  const adapter = adapterFactory(options) as DBAdapter;
+  const authOptions = auth.options as BetterAuthOptions;
+  const adapterFactory = authOptions.database as DBAdapterInstance;
+  const adapter = adapterFactory(authOptions) as DBAdapter;
 
-  const schema = await adapter.createSchema?.(options, ".better-auth/schema.surql");
+  const schema = await adapter.createSchema?.(authOptions, ".better-auth/schema.surql");
   if (!schema?.code) {
     throw new Error("Adapter did not generate schema code for live tests.");
   }
-  await db.query(schema.code);
+  await recreateDefinedTables(db, schema.code);
   await truncateAuthTables(db);
 
   return {

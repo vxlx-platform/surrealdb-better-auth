@@ -5,11 +5,11 @@ import { Surreal } from "surrealdb";
 const AUTH_TABLES = ["user", "session", "account", "verification"] as const;
 
 const runtimeConfig = {
-  endpoint: process.env.SURREALDB_TEST_ENDPOINT?.trim(),
+  endpoint: process.env.SURREALDB_TEST_ENDPOINT?.trim() || "ws://localhost:8000/rpc",
   username: process.env.SURREALDB_TEST_USERNAME?.trim() ?? "root",
   password: process.env.SURREALDB_TEST_PASSWORD?.trim() ?? "root",
-  namespace: process.env.SURREALDB_TEST_NAMESPACE?.trim(),
-  database: process.env.SURREALDB_TEST_DATABASE?.trim(),
+  namespace: process.env.SURREALDB_TEST_NAMESPACE?.trim() || "main",
+  database: process.env.SURREALDB_TEST_DATABASE?.trim() || "main",
   isolate: process.env.SURREALDB_TEST_ISOLATE === "1",
 };
 
@@ -20,8 +20,6 @@ export type LiveDbConnection = {
   database: string;
   closeDb: () => Promise<true>;
 };
-
-export const hasLiveSurrealEndpoint = Boolean(runtimeConfig.endpoint);
 
 const createScopedName = (prefix: string) => {
   const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
@@ -44,12 +42,6 @@ export async function truncateAuthTables(db: Surreal) {
 }
 
 export async function createTestDbConnection(): Promise<LiveDbConnection> {
-  if (!runtimeConfig.endpoint) {
-    throw new Error(
-      "Missing SURREALDB_TEST_ENDPOINT. Configure a dedicated live test database endpoint.",
-    );
-  }
-
   const namespace = resolveTestName(runtimeConfig.namespace, "test", "ba_ns");
   const database = resolveTestName(runtimeConfig.database, "test", "ba_db");
 
