@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";
+import { buildAccountSeed, buildSessionSeed, buildUserSeed } from "../../__helpers__/fixtures";
 
 describe("Adapter Core - Batch Operations (updateMany/deleteMany)", () => {
   let context: AuthContext | undefined;
@@ -32,17 +33,47 @@ describe("Adapter Core - Batch Operations (updateMany/deleteMany)", () => {
       const context = requireContext();
       const now = new Date();
       const users = [
-        { name: "User 1", email: "u1@test.com", emailVerified: false },
-        { name: "User 2", email: "u2@test.com", emailVerified: false },
-        { name: "User 3", email: "u3@test.com", emailVerified: false },
-        { name: "User 4", email: "u4@test.com", emailVerified: true },
-        { name: "User 5", email: "u5@test.com", emailVerified: true },
+        buildUserSeed({
+          name: "User 1",
+          email: "u1@test.com",
+          emailVerified: false,
+          createdAt: now,
+          updatedAt: now,
+        }),
+        buildUserSeed({
+          name: "User 2",
+          email: "u2@test.com",
+          emailVerified: false,
+          createdAt: now,
+          updatedAt: now,
+        }),
+        buildUserSeed({
+          name: "User 3",
+          email: "u3@test.com",
+          emailVerified: false,
+          createdAt: now,
+          updatedAt: now,
+        }),
+        buildUserSeed({
+          name: "User 4",
+          email: "u4@test.com",
+          emailVerified: true,
+          createdAt: now,
+          updatedAt: now,
+        }),
+        buildUserSeed({
+          name: "User 5",
+          email: "u5@test.com",
+          emailVerified: true,
+          createdAt: now,
+          updatedAt: now,
+        }),
       ];
 
       for (const user of users) {
         await context.adapter.create({
           model: "user",
-          data: { ...user, createdAt: now, updatedAt: now },
+          data: user,
         });
       }
 
@@ -71,15 +102,13 @@ describe("Adapter Core - Batch Operations (updateMany/deleteMany)", () => {
       for (const [index, expiresAt] of [pastDate, pastDate, futureDate, futureDate].entries()) {
         await context.adapter.create({
           model: "session",
-          data: {
+          data: buildSessionSeed({
             token: `${index < 2 ? "exp" : "act"}_${index}`,
             expiresAt,
-            ipAddress: undefined,
-            userAgent: undefined,
             userId: `user:seed_user_${index}`,
             createdAt: now,
             updatedAt: now,
-          },
+          }),
         });
       }
 
@@ -105,20 +134,13 @@ describe("Adapter Core - Batch Operations (updateMany/deleteMany)", () => {
       for (let i = 1; i <= 5; i += 1) {
         await context.adapter.create({
           model: "account",
-          data: {
+          data: buildAccountSeed({
             accountId: `acc_${i}`,
             providerId: `provider_${i}`,
             userId: `user:seed_user_${i}`,
-            accessToken: undefined,
-            refreshToken: undefined,
-            idToken: undefined,
-            accessTokenExpiresAt: undefined,
-            refreshTokenExpiresAt: undefined,
-            scope: undefined,
-            password: undefined,
             createdAt: now,
             updatedAt: now,
-          },
+          }),
         });
       }
 
@@ -140,15 +162,13 @@ describe("Adapter Core - Batch Operations (updateMany/deleteMany)", () => {
       await expect(
         context.adapter.create({
           model: "session",
-          data: {
+          data: buildSessionSeed({
             token: "bad_ref",
             expiresAt: new Date(Date.now() + 60_000),
-            ipAddress: undefined,
-            userAgent: undefined,
             userId: "account:not-a-user",
             createdAt: new Date(),
             updatedAt: new Date(),
-          },
+          }),
         }),
       ).rejects.toThrow(/Record id "account:not-a-user".*expected "user"/i);
     });

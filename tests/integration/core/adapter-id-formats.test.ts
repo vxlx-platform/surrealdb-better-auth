@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { surrealAdapter } from "../../../src";
 import { createTestDbConnection, truncateAuthTables } from "../../__helpers__/db";
+import { buildUserSeed } from "../../__helpers__/fixtures";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
@@ -194,13 +195,11 @@ describe("Live DB - Adapter Record ID Formats", () => {
     await expect(
       built.adapter.create({
         model: "user",
-        data: {
+        data: buildUserSeed({
           name: "Invalid Format User",
           email: "invalid.id.format@example.com",
           emailVerified: false,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
+        }),
       }),
     ).rejects.toThrow(/Unsupported recordIdFormat "uuidv4"/);
   });

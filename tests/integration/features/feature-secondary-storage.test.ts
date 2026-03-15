@@ -10,7 +10,12 @@ type CacheEntry = {
   expiresAt: number | null;
 };
 
-const createInMemorySecondaryStorage = () => {
+type SecondaryStorageWithHelpers = NonNullable<BetterAuthOptions["secondaryStorage"]> & {
+  clear: () => void;
+  keys: () => string[];
+};
+
+const createInMemorySecondaryStorage = (): SecondaryStorageWithHelpers => {
   const entries = new Map<string, CacheEntry>();
 
   const read = (key: string): string | undefined => {
@@ -60,7 +65,7 @@ describe("Feature - Secondary Storage Sessions", () => {
       session: {
         storeSessionInDatabase: false,
       },
-      secondaryStorage: secondaryStorage as unknown as BetterAuthOptions["secondaryStorage"],
+      secondaryStorage,
     });
 
     const ctx = requireContext();

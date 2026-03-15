@@ -289,10 +289,6 @@ describe("Live DB - JWT JWKS Surreal Access", () => {
         "RETURN { authRef: $auth, authRaw: $auth, tokenRaw: $token, authKey: record::id($auth), authTable: record::tb($auth), access: $access };",
       );
       const result = firstRows(raw)[0];
-      console.info("Surreal runtime auth/token values", {
-        auth: result?.authRaw,
-        token: result?.tokenRaw,
-      });
       expect(result).toBeDefined();
       expect(String(result?.authRef)).toBe(issued.signUp.user.id);
       expect(result?.authKey).toBe(issued.signUp.user.id.split(":")[1]);

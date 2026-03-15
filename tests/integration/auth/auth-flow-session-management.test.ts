@@ -27,7 +27,42 @@ describe("Auth Flow - Session Management", () => {
     return context;
   };
 
-  const getSessionApi = (ctx: AuthContext): SessionApi => ctx.auth.api as unknown as SessionApi;
+  const requireApiMethod = <TArgs extends unknown[], TResult>(
+    api: Record<string, unknown>,
+    methodName: string,
+  ) => {
+    const method = api[methodName];
+    if (typeof method !== "function") {
+      throw new Error(`Auth API method "${methodName}" is not available in this test context.`);
+    }
+    return method as (...args: TArgs) => TResult;
+  };
+
+  const getSessionApi = (ctx: AuthContext): SessionApi => {
+    const api = ctx.auth.api as Record<string, unknown>;
+    return {
+      listSessions: requireApiMethod<[Parameters<SessionApi["listSessions"]>[0]], ReturnType<SessionApi["listSessions"]>>(
+        api,
+        "listSessions",
+      ),
+      revokeSession: requireApiMethod<
+        [Parameters<SessionApi["revokeSession"]>[0]],
+        ReturnType<SessionApi["revokeSession"]>
+      >(api, "revokeSession"),
+      revokeOtherSessions: requireApiMethod<
+        [Parameters<SessionApi["revokeOtherSessions"]>[0]],
+        ReturnType<SessionApi["revokeOtherSessions"]>
+      >(api, "revokeOtherSessions"),
+      revokeSessions: requireApiMethod<
+        [Parameters<SessionApi["revokeSessions"]>[0]],
+        ReturnType<SessionApi["revokeSessions"]>
+      >(api, "revokeSessions"),
+      signOut: requireApiMethod<[Parameters<SessionApi["signOut"]>[0]], ReturnType<SessionApi["signOut"]>>(
+        api,
+        "signOut",
+      ),
+    };
+  };
 
   const createUserWithSessions = async (count: number) => {
     const ctx = requireContext();

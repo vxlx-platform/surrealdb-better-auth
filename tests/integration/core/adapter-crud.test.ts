@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";
+import { buildUserSeed } from "../../__helpers__/fixtures";
 
 describe("Live DB - Better Auth CRUD", () => {
   let context: AuthContext | undefined;
@@ -28,16 +29,15 @@ describe("Live DB - Better Auth CRUD", () => {
 
   it("performs create/find/update/count/delete against a live SurrealDB instance", async () => {
     const context = requireContext();
-    const now = new Date();
+    const user = buildUserSeed({
+      email: "live-crud@example.com",
+      name: "Live CRUD",
+      emailVerified: false,
+    });
+
     const created = await context.adapter.create<Record<string, unknown>>({
       model: "user",
-      data: {
-        email: "live-crud@example.com",
-        name: "Live CRUD",
-        emailVerified: false,
-        createdAt: now,
-        updatedAt: now,
-      },
+      data: user,
     });
 
     expect(created.id).toMatch(/^user:/);
@@ -81,13 +81,13 @@ describe("Live DB - Better Auth CRUD", () => {
     for (const [index, name] of ["Alpha User", "Beta User", "Gamma User"].entries()) {
       await context.adapter.create<Record<string, unknown>>({
         model: "user",
-        data: {
+        data: buildUserSeed({
           email: `live-operators-${index}@example.com`,
           name,
           emailVerified: index !== 1,
           createdAt: now,
           updatedAt: now,
-        },
+        }),
       });
     }
 
@@ -135,13 +135,13 @@ describe("Live DB - Better Auth CRUD", () => {
     for (let index = 0; index < 3; index += 1) {
       const created = await context.adapter.create<Record<string, unknown>>({
         model: "user",
-        data: {
+        data: buildUserSeed({
           email: `live-bulk-${index}@example.com`,
           name: `Bulk ${index}`,
           emailVerified: false,
           createdAt: now,
           updatedAt: now,
-        },
+        }),
       });
       createdIds.push(String(created.id));
     }

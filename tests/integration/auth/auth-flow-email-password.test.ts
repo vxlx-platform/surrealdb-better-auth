@@ -6,6 +6,30 @@ import type { AuthContext } from "../../__helpers__/auth-context";
 import { startTestServer } from "../../__helpers__/server";
 import type { RunningTestServer } from "../../__helpers__/server";
 
+type ChangePasswordMethod = (input: {
+  headers: Headers;
+  body: {
+    currentPassword: string;
+    newPassword: string;
+    revokeOtherSessions?: boolean;
+  };
+}) => Promise<{ token?: string; user: { id: string } }>;
+
+type SendVerificationEmailMethod = (input: { body: { email: string } }) => Promise<unknown>;
+
+type VerifyEmailMethod = (input: { query: { token: string } }) => Promise<{ status?: boolean }>;
+
+const requireApiMethod = <TArgs extends unknown[], TResult>(
+  api: Record<string, unknown>,
+  methodName: string,
+) => {
+  const method = api[methodName];
+  if (typeof method !== "function") {
+    throw new Error(`Auth API method "${methodName}" is not available in this test context.`);
+  }
+  return method as (...args: TArgs) => TResult;
+};
+
 describe("Auth Flow - Email/Password", () => {
   let context: AuthContext | undefined;
   let server: RunningTestServer | undefined;
@@ -122,16 +146,11 @@ describe("Auth Flow - Email/Password", () => {
 
   it("allows a user to update their own password via changePassword", async () => {
     const context = requireContext();
-    const api = context.auth.api as unknown as {
-      changePassword: (input: {
-        headers: Headers;
-        body: {
-          currentPassword: string;
-          newPassword: string;
-          revokeOtherSessions?: boolean;
-        };
-      }) => Promise<{ token?: string; user: { id: string } }>;
-    };
+    const api = context.auth.api as Record<string, unknown>;
+    const changePassword = requireApiMethod<[Parameters<ChangePasswordMethod>[0]], ReturnType<ChangePasswordMethod>>(
+      api,
+      "changePassword",
+    );
 
     const email = "change-password@example.com";
     const currentPassword = "CurrentPassword123!";
@@ -146,7 +165,7 @@ describe("Auth Flow - Email/Password", () => {
     });
 
     const userHeaders = await createSessionHeaders(email, currentPassword);
-    const changed = await api.changePassword({
+    const changed = await changePassword({
       headers: userHeaders,
       body: {
         currentPassword,
@@ -222,10 +241,15 @@ describe("Auth Flow - Email Verification", () => {
 
   it("blocks sign-in before verification, then allows it after verifyEmail", async () => {
     const context = requireContext();
-    const api = context.auth.api as unknown as {
-      sendVerificationEmail: (input: { body: { email: string } }) => Promise<unknown>;
-      verifyEmail: (input: { query: { token: string } }) => Promise<{ status?: boolean }>;
-    };
+    const api = context.auth.api as Record<string, unknown>;
+    const sendVerificationEmail = requireApiMethod<
+      [Parameters<SendVerificationEmailMethod>[0]],
+      ReturnType<SendVerificationEmailMethod>
+    >(api, "sendVerificationEmail");
+    const verifyEmail = requireApiMethod<[Parameters<VerifyEmailMethod>[0]], ReturnType<VerifyEmailMethod>>(
+      api,
+      "verifyEmail",
+    );
 
     const email = "verify-me@example.com";
     const password = "VerifyPassword123!";
@@ -245,14 +269,14 @@ describe("Auth Flow - Email Verification", () => {
       }),
     ).rejects.toThrow();
 
-    await api.sendVerificationEmail({
+    await sendVerificationEmail({
       body: { email },
     });
 
     const token = verificationTokens.get(email);
     expect(token).toBeDefined();
 
-    const verified = await api.verifyEmail({
+    const verified = await verifyEmail({
       query: { token: token! },
     });
     expect(verified.status).toBe(true);
