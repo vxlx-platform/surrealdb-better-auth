@@ -550,11 +550,14 @@ The browser suite starts the example Bun server automatically and proxies `/api/
 ## Development
 
 ```bash
-npm run build
-npm run test
+bun run build
+bun run test
 ```
 
-Note: Integration tests require a local SurrealDB instance reachable at `ws://localhost:8000/rpc`, accessed through the current SurrealDB JavaScript SDK v2 client and credentials used in the test helpers.
+By default, `bun run test` runs the live integration suite.  
+Use `bun run test:mock` for mocked/non-essential checks (query shaping, error-branch coverage).
+
+Note: Live integration tests require a local SurrealDB instance reachable at `ws://localhost:8000/rpc`, accessed through the current SurrealDB JavaScript SDK v2 client and credentials used in the test helpers.
 
 Live test DB scope can be configured with:
 

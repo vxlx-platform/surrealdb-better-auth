@@ -152,9 +152,10 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
   };
 
   const createTargetExpression = (table: string, format: RecordIdFormat) => {
-    if (format === "uuidv7") return `type::thing(${JSON.stringify(table)}, rand::uuid())`;
-    if (format === "ulid") return `type::thing(${JSON.stringify(table)}, rand::ulid())`;
-    return escapeIdent(table);
+    const escapedTable = escapeIdent(table);
+    if (format === "uuidv7") return `${escapedTable}:uuid()`;
+    if (format === "ulid") return `${escapedTable}:ulid()`;
+    return escapedTable;
   };
 
   const omitUndefinedFields = <T extends Record<string, unknown>>(value: T): T =>
