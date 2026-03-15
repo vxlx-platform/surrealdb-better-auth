@@ -42,11 +42,11 @@ const createAuth = (db: Surreal, options?: SetupAuthContextOptions) =>
     secret: "01234567890123456789012345678901",
     emailAndPassword: {
       enabled: true,
-      ...(options?.emailAndPassword ?? {}),
+      ...options?.emailAndPassword,
       password: {
         hash: async (password) => password,
         verify: async ({ hash, password }) => hash === password,
-        ...(options?.emailAndPassword?.password ?? {}),
+        ...options?.emailAndPassword?.password,
       },
     },
     ...(options?.plugins ? { plugins: options.plugins } : {}),
