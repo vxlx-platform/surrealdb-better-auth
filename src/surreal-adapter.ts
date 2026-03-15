@@ -43,13 +43,7 @@ export interface SurrealAdapterConfig {
   usePlural?: boolean;
   transaction?: boolean;
   recordIdFormat?: RecordIdFormatResolver;
-  apiEndpoints?: boolean | SchemaApiEndpointsConfig;
   defineAccess?: () => BoundQuery<unknown[]>;
-}
-
-export interface SchemaApiEndpointsConfig {
-  basePath?: string;
-  models?: string[];
 }
 
 type SchemaField = Pick<
@@ -346,17 +340,6 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     getFieldName: ({ model, field }: { model: string; field: string }) => string;
   }) => {
     const lines: string[] = [];
-    const apiCfg =
-      config.apiEndpoints === true
-        ? {}
-        : config.apiEndpoints && typeof config.apiEndpoints === "object"
-          ? config.apiEndpoints
-          : null;
-    const apiModels = new Set(
-      apiCfg?.models?.length ? apiCfg.models : ["user", "session", "account"],
-    );
-    const apiBasePath = apiCfg?.basePath ? `/${apiCfg.basePath.replace(/^\/+|\/+$/g, "")}` : "";
-    const apiTables: string[] = [];
     type SchemaTable = (typeof tables)[string];
 
     const emitUniqueIndex = (tableName: string, resolvedField: string) => {
@@ -397,10 +380,6 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       const tableName = escapeIdent(getModelName(modelName));
       lines.push(`DEFINE TABLE OVERWRITE ${tableName} SCHEMAFULL;`);
 
-      if (apiCfg && apiModels.has(modelName)) {
-        apiTables.push(getModelName(modelName));
-      }
-
       for (const [fieldKey, field] of Object.entries(table.fields)) {
         emitFieldDefinition({
           modelName,
@@ -413,33 +392,8 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       lines.push("");
     };
 
-    const emitApiEndpoint = (tableName: string) => {
-      const escapedTable = escapeIdent(tableName);
-      const path = `${apiBasePath}/${tableName}`;
-      lines.push(
-        `DEFINE API OVERWRITE "${path}"`,
-        "  FOR get",
-        "  MIDDLEWARE",
-        '    api::res::body("json")',
-        "  THEN {",
-        "    {",
-        "      status: 200,",
-        `      body: SELECT * FROM ${escapedTable}`,
-        "    }",
-        "  }",
-        ";",
-        "",
-      );
-    };
-
     for (const table of Object.values(tables)) {
       emitTableDefinition(table);
-    }
-
-    if (apiCfg) {
-      for (const tableName of apiTables) {
-        emitApiEndpoint(tableName);
-      }
     }
 
     const renderAccessStatement = () => {

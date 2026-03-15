@@ -422,7 +422,6 @@ Defaults:
 - Better Auth base: `http://localhost:3000/api/auth`
 - JWKS route: `http://localhost:3000/api/auth/.well-known`
 - SurrealDB WS endpoint: `ws://localhost:8000/rpc`
-- SurrealDB API endpoint base: `http://localhost:8000/api/main/main`
 
 Environment variables:
 
@@ -567,5 +566,4 @@ Live test DB scope can be configured with:
 
 ## TODO
 
-- Decide whether internal `DEFINE API` test support should remain in the public package surface at all.
 - Expand transaction coverage to mixed Better Auth plugin flows that perform multiple model writes in one callback.
