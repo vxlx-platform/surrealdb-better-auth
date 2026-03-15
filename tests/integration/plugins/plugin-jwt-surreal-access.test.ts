@@ -197,6 +197,10 @@ describe("Live DB - JWT JWKS Surreal Access", () => {
         jwt({
           jwks: {
             jwksPath,
+            keyPairConfig: {
+              alg: "RS256",
+              modulusLength: 2048,
+            },
           },
           jwt: {
             definePayload: (session) => ({
@@ -298,4 +302,5 @@ describe("Live DB - JWT JWKS Surreal Access", () => {
       // await surrealClient.close();
     }
   });
+
 });

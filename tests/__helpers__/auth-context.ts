@@ -10,6 +10,8 @@ type SetupAuthContextOptions = {
   plugins?: BetterAuthOptions["plugins"];
   emailAndPassword?: BetterAuthOptions["emailAndPassword"];
   emailVerification?: BetterAuthOptions["emailVerification"];
+  session?: BetterAuthOptions["session"];
+  secondaryStorage?: BetterAuthOptions["secondaryStorage"];
 };
 
 const extractDefinedTables = (schemaCode: string): string[] => {
@@ -49,6 +51,8 @@ const createAuth = (db: Surreal, options?: SetupAuthContextOptions) =>
     },
     ...(options?.plugins ? { plugins: options.plugins } : {}),
     ...(options?.emailVerification ? { emailVerification: options.emailVerification } : {}),
+    ...(options?.session ? { session: options.session } : {}),
+    ...(options?.secondaryStorage ? { secondaryStorage: options.secondaryStorage } : {}),
     database: surrealAdapter(db),
   });
 
