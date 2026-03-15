@@ -18,6 +18,7 @@ const createMockClient = (): MockClient => ({
 });
 
 const buildAdapter = () => {
+  const client = createMockClient();
   const auth = betterAuth({
     baseURL: "http://127.0.0.1:3000",
     secret: "01234567890123456789012345678901",
@@ -72,13 +73,13 @@ const buildAdapter = () => {
         updatedAt: "updated_at",
       },
     },
-    database: surrealAdapter(createMockClient() as never),
+    database: surrealAdapter(client as never),
   });
 
   const options = auth.options as BetterAuthOptions;
   const factory = options.database as DBAdapterInstance;
   const adapter = factory(options);
-  return { adapter, options };
+  return { adapter, options, client };
 };
 
 describe("Adapter Core - Field/Model Remapping (Mocked Schema)", () => {
@@ -105,5 +106,30 @@ describe("Adapter Core - Field/Model Remapping (Mocked Schema)", () => {
     expect(schema?.code).toContain(
       "DEFINE FIELD OVERWRITE verification_identifier ON TABLE app_verification TYPE string;",
     );
+  });
+
+  it("uses remapped table and field names in runtime queries", async () => {
+    const { adapter, client } = buildAdapter();
+    client.query.mockResolvedValue([[]]);
+
+    await adapter.findMany<Record<string, unknown>>({
+      model: "user",
+      where: [{ field: "email", operator: "eq", value: "remap@example.com" }],
+      sortBy: { field: "createdAt", direction: "desc" },
+      select: ["id", "email", "createdAt"],
+      limit: 10,
+      offset: 2,
+    });
+
+    expect(client.query).toHaveBeenCalled();
+    const [query, bindings] = client.query.mock.calls.at(-1) as [string, Record<string, unknown>];
+    expect(query).toContain("FROM app_user");
+    expect(query).toContain("email_address");
+    expect(query).toContain("created_at");
+    expect(query).toContain("ORDER BY created_at DESC");
+    expect(query).toContain("LIMIT $limit");
+    expect(query).toContain("START $offset");
+    expect(bindings.limit).toBe(10);
+    expect(bindings.offset).toBe(2);
   });
 });

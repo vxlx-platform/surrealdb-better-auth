@@ -479,17 +479,20 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
   const buildWhereClause = (
     where: Where[] | undefined,
     model: string,
+    tableName: string,
     idFieldName: string,
+    resolveFieldName: (model: string, field: string) => string,
   ): { clause: string; bindings: Record<string, unknown> } => {
     if (!where?.length) return { clause: "", bindings: {} };
 
     const toConditionExpr = (item: Where): Expr => {
-      const field = escapeIdent(item.field);
+      const dbFieldName = resolveFieldName(model, item.field);
+      const field = escapeIdent(dbFieldName);
       const operator = resolveWhereOperator(item.operator);
 
-      const expectedReferenceTable = item.field === idFieldName ? model : undefined;
+      const expectedReferenceTable = dbFieldName === idFieldName ? tableName : undefined;
       const normalizedValue =
-        item.field === idFieldName
+        dbFieldName === idFieldName
           ? toRecordIdInput(item.value, expectedReferenceTable)
           : item.value;
 
@@ -516,6 +519,15 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       getFieldName,
       getModelName,
     }: Parameters<NonNullable<AdapterFactoryOptions["adapter"]>>[0]) => {
+      const resolveTableName = (model: string) => getModelName(model);
+      const resolveFieldName = (model: string, field: string) => {
+        try {
+          return getFieldName({ model, field });
+        } catch {
+          return field;
+        }
+      };
+
       const queryOne = async <T>(query: string, bindings: Record<string, unknown>) => {
         const result = await db.query<QueryRows<T>>(query, bindings);
         return toFirstRow<T>(result);
@@ -526,8 +538,10 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         return toResultRows<T>(result);
       };
 
-      const selectColumns = (select?: string[]) =>
-        select && select.length > 0 ? select.map((field) => escapeIdent(field)).join(", ") : "*";
+      const selectColumns = (model: string, select?: string[]) =>
+        select && select.length > 0
+          ? select.map((field) => escapeIdent(resolveFieldName(model, field))).join(", ")
+          : "*";
 
       const joinQueryParts = (...parts: Array<string | undefined>) =>
         parts
@@ -552,6 +566,11 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           noneFields,
         };
       };
+
+      const mapWritePayload = (model: string, payload: Record<string, unknown>) =>
+        Object.fromEntries(
+          Object.entries(payload).map(([field, value]) => [resolveFieldName(model, field), value]),
+        ) as Record<string, unknown>;
 
       const buildNoneSetClause = (fields: string[]) =>
         fields.map((field) => `${escapeIdent(field)} = NONE`).join(", ");
@@ -580,18 +599,27 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           offsetClause,
         )};`;
 
-      const idFieldForModel = (model: string) => getFieldName({ model, field: "id" });
+      const idFieldForModel = (model: string) => resolveFieldName(model, "id");
 
       const resolveSingleRecordId = async (model: string, where: Where[]) => {
+        const resolvedTableName = resolveTableName(model);
         const idField = idFieldForModel(model);
         const fastPath =
-          where.length === 1 && where[0]?.field === idField && where[0].operator === "eq";
+          where.length === 1 &&
+          resolveFieldName(model, String(where[0]?.field ?? "")) === idField &&
+          where[0]?.operator === "eq";
         if (fastPath) {
-          return toStringRecordId(where[0]!.value, model);
+          return toStringRecordId(where[0]!.value, resolvedTableName);
         }
 
-        const tableName = escapeIdent(model);
-        const whereClause = buildWhereClause(where, model, idField);
+        const tableName = escapeIdent(resolvedTableName);
+        const whereClause = buildWhereClause(
+          where,
+          model,
+          resolvedTableName,
+          idField,
+          resolveFieldName,
+        );
         const query = `SELECT VALUE ${escapeIdent(idField)} FROM ${tableName} ${whereClause.clause} LIMIT 1;`;
         const rows = await db.query<QueryRows<StringRecordId | RecordId | string>>(
           query,
@@ -599,13 +627,20 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         );
         const first = toFirstRow(rows);
         if (!first) return null;
-        return toStringRecordId(first, model);
+        return toStringRecordId(first, resolvedTableName);
       };
 
       const countRecords = async (model: string, where?: CleanedWhere[]) => {
-        const tableName = escapeIdent(model);
+        const resolvedTableName = resolveTableName(model);
+        const tableName = escapeIdent(resolvedTableName);
         const idField = idFieldForModel(model);
-        const whereClause = buildWhereClause(where, model, idField);
+        const whereClause = buildWhereClause(
+          where,
+          model,
+          resolvedTableName,
+          idField,
+          resolveFieldName,
+        );
         const query = `SELECT count() AS total FROM ${tableName} ${whereClause.clause} GROUP ALL;`;
         const row = await queryOne<{ total: number }>(query, whereClause.bindings);
         return Number(row?.total ?? 0);
@@ -621,18 +656,20 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           select?: string[] | undefined;
         }): Promise<T> {
           const explicitIdField = idFieldForModel(model);
-          const explicitId = data[explicitIdField];
-          const table = model;
+          const explicitId = data[explicitIdField] ?? data.id;
+          const table = resolveTableName(model);
 
           if (explicitId !== undefined && explicitId !== null) {
             throw adapterError(
-              `Explicit ids are not supported for model "${table}". Let SurrealDB generate the record id.`,
+              `Explicit ids are not supported for model "${model}". Let SurrealDB generate the record id.`,
             );
           }
 
           const format = resolveRecordIdFormat(config.recordIdFormat, table);
           const targetExpression = createTargetExpression(table, format);
-          const createData = omitUndefinedFields(data);
+          const createData = omitUndefinedFields(
+            mapWritePayload(model, data as Record<string, unknown>),
+          );
           const query = `CREATE ONLY ${targetExpression} CONTENT $data RETURN AFTER;`;
           const created = await queryOne<T>(query, {
             data: createData,
@@ -650,10 +687,17 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           where: CleanedWhere[];
           select?: string[] | undefined;
         }): Promise<T | null> {
-          const tableName = escapeIdent(model);
+          const resolvedTableName = resolveTableName(model);
+          const tableName = escapeIdent(resolvedTableName);
           const idField = idFieldForModel(model);
-          const columns = selectColumns(select);
-          const whereClause = buildWhereClause(where, model, idField);
+          const columns = selectColumns(model, select);
+          const whereClause = buildWhereClause(
+            where,
+            model,
+            resolvedTableName,
+            idField,
+            resolveFieldName,
+          );
           const query = buildSelectQuery({
             columns,
             tableName,
@@ -678,13 +722,20 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           sortBy?: { field: string; direction: "asc" | "desc" } | undefined;
           offset?: number | undefined;
         }): Promise<T[]> {
-          const tableName = escapeIdent(model);
+          const resolvedTableName = resolveTableName(model);
+          const tableName = escapeIdent(resolvedTableName);
           const idField = idFieldForModel(model);
-          const columns = selectColumns(select);
-          const whereClause = buildWhereClause(where, model, idField);
+          const columns = selectColumns(model, select);
+          const whereClause = buildWhereClause(
+            where,
+            model,
+            resolvedTableName,
+            idField,
+            resolveFieldName,
+          );
           const bindings: Record<string, unknown> = { ...whereClause.bindings };
           const orderBy = sortBy
-            ? `ORDER BY ${escapeIdent(sortBy.field)} ${sortBy.direction.toUpperCase()}`
+            ? `ORDER BY ${escapeIdent(resolveFieldName(model, sortBy.field))} ${sortBy.direction.toUpperCase()}`
             : undefined;
           const limitClause = typeof limit === "number" ? "LIMIT $limit" : undefined;
           const offsetClause = typeof offset === "number" ? "START $offset" : undefined;
@@ -725,7 +776,8 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           const target = await resolveSingleRecordId(model, where);
           if (!target) return null;
           const updateData = toObjectRecord(update, `update payload for "${model}"`);
-          const { nonNullUpdate, noneFields } = splitUpdatePayload(updateData);
+          const mappedUpdateData = mapWritePayload(model, updateData);
+          const { nonNullUpdate, noneFields } = splitUpdatePayload(mappedUpdateData);
 
           if (Object.keys(nonNullUpdate).length > 0) {
             await db.query("UPDATE $target MERGE $update;", {
@@ -758,9 +810,17 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           const countBefore = await countRecords(model, where);
           if (countBefore === 0) return 0;
 
-          const tableName = escapeIdent(model);
-          const whereClause = buildWhereClause(where, model, idField);
-          const { nonNullUpdate, noneFields } = splitUpdatePayload(update);
+          const resolvedTableName = resolveTableName(model);
+          const tableName = escapeIdent(resolvedTableName);
+          const whereClause = buildWhereClause(
+            where,
+            model,
+            resolvedTableName,
+            idField,
+            resolveFieldName,
+          );
+          const mappedUpdate = mapWritePayload(model, update);
+          const { nonNullUpdate, noneFields } = splitUpdatePayload(mappedUpdate);
 
           if (Object.keys(nonNullUpdate).length > 0) {
             const mergeQuery = `UPDATE ${tableName} MERGE $update ${whereClause.clause};`;
@@ -794,8 +854,15 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           const countBefore = await countRecords(model, where);
           if (countBefore === 0) return 0;
 
-          const tableName = escapeIdent(model);
-          const whereClause = buildWhereClause(where, model, idField);
+          const resolvedTableName = resolveTableName(model);
+          const tableName = escapeIdent(resolvedTableName);
+          const whereClause = buildWhereClause(
+            where,
+            model,
+            resolvedTableName,
+            idField,
+            resolveFieldName,
+          );
           const query = `DELETE ${tableName} ${whereClause.clause};`;
           await db.query(query, whereClause.bindings);
           return countBefore;
