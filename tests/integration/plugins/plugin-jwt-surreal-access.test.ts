@@ -8,8 +8,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { surrealAdapter } from "../../../src";
 import type { SurrealAdapterConfig } from "../../../src";
 import { createTestDbConnection, truncateAuthTables } from "../../__helpers__/db";
-import { startTestServer } from "../../__helpers__/test-server";
-import type { RunningTestServer } from "../../__helpers__/test-server";
+import { startTestServer } from "../../__helpers__/server";
+import type { RunningTestServer } from "../../__helpers__/server";
 
 type JwtPayload = {
   exp?: number;

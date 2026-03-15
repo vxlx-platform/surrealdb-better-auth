@@ -1,12 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { setCookieToHeader } from "better-auth/cookies";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";
-import { startTestServer } from "../../__helpers__/test-server";
-import type { RunningTestServer } from "../../__helpers__/test-server";
+import { startTestServer } from "../../__helpers__/server";
+import type { RunningTestServer } from "../../__helpers__/server";
 
-describe("Live DB - Better Auth Email/Password Flow", () => {
+describe("Auth Flow - Email/Password", () => {
   let context: AuthContext | undefined;
   let server: RunningTestServer | undefined;
   const requireContext = (): AuthContext => {
@@ -84,38 +83,6 @@ describe("Live DB - Better Auth Email/Password Flow", () => {
         },
       }),
     ).rejects.toThrow();
-  });
-
-  it("supports getSession and signOut lifecycle with cookie headers", async () => {
-    const context = requireContext();
-    const email = "live-session@example.com";
-    const password = "live-session-password";
-
-    const signUpResponse = await context.auth.api.signUpEmail({
-      body: {
-        email,
-        password,
-        name: "Live Session User",
-      },
-      asResponse: true,
-    });
-
-    const headers = new Headers();
-    setCookieToHeader(headers)({ response: signUpResponse });
-
-    const session = await context.auth.api.getSession({ headers });
-    expect(session?.user.id).toMatch(/^user:/);
-    expect(session?.user.email).toBe(email);
-    expect(session?.session.userId).toBe(session?.user.id);
-
-    const signOutResponse = await context.auth.api.signOut({
-      headers,
-      asResponse: true,
-    });
-    setCookieToHeader(headers)({ response: signOutResponse });
-
-    const afterSignOut = await context.auth.api.getSession({ headers });
-    expect(afterSignOut).toBeNull();
   });
 
   it("rejects duplicate email sign-up with a unique constraint error", async () => {

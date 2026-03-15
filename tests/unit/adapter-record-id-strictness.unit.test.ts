@@ -4,7 +4,7 @@ import { betterAuth } from "better-auth";
 import { DateTime, RecordId, StringRecordId } from "surrealdb";
 import { describe, expect, it, vi } from "vitest";
 
-import { surrealAdapter } from "../../../src";
+import { surrealAdapter } from "../../src";
 
 type MockClient = {
   query: ReturnType<typeof vi.fn>;

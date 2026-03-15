@@ -6,7 +6,7 @@ import type { BoundQuery } from "surrealdb";
 import { surql } from "surrealdb";
 import { describe, expect, it, vi } from "vitest";
 
-import { surrealAdapter } from "../../../src";
+import { surrealAdapter } from "../../src";
 
 type MockClient = {
   query: ReturnType<typeof vi.fn>;
