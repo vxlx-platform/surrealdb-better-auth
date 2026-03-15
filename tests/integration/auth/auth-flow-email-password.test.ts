@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { setCookieToHeader } from "better-auth/cookies";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";
@@ -19,6 +20,17 @@ describe("Auth Flow - Email/Password", () => {
       throw new Error("Live test server was not initialized.");
     }
     return server;
+  };
+
+  const createSessionHeaders = async (email: string, password: string) => {
+    const context = requireContext();
+    const signInResponse = await context.auth.api.signInEmail({
+      body: { email, password },
+      asResponse: true,
+    });
+    const headers = new Headers();
+    setCookieToHeader(headers)({ response: signInResponse });
+    return headers;
   };
 
   beforeAll(async () => {
@@ -106,5 +118,155 @@ describe("Auth Flow - Email/Password", () => {
         },
       }),
     ).rejects.toThrow();
+  });
+
+  it("allows a user to update their own password via changePassword", async () => {
+    const context = requireContext();
+    const api = context.auth.api as unknown as {
+      changePassword: (input: {
+        headers: Headers;
+        body: {
+          currentPassword: string;
+          newPassword: string;
+          revokeOtherSessions?: boolean;
+        };
+      }) => Promise<{ token?: string; user: { id: string } }>;
+    };
+
+    const email = "change-password@example.com";
+    const currentPassword = "CurrentPassword123!";
+    const newPassword = "UpdatedPassword123!";
+
+    const signUp = await context.auth.api.signUpEmail({
+      body: {
+        name: "Password Changer",
+        email,
+        password: currentPassword,
+      },
+    });
+
+    const userHeaders = await createSessionHeaders(email, currentPassword);
+    const changed = await api.changePassword({
+      headers: userHeaders,
+      body: {
+        currentPassword,
+        newPassword,
+        revokeOtherSessions: true,
+      },
+    });
+    expect(changed.user.id).toBe(signUp.user.id);
+    expect(changed.token).toBeDefined();
+
+    await expect(
+      context.auth.api.signInEmail({
+        body: {
+          email,
+          password: currentPassword,
+        },
+      }),
+    ).rejects.toThrow();
+
+    const nextSignIn = await context.auth.api.signInEmail({
+      body: {
+        email,
+        password: newPassword,
+      },
+    });
+    expect(nextSignIn.user.id).toBe(signUp.user.id);
+    expect(nextSignIn.token).toBeDefined();
+  });
+});
+
+describe("Auth Flow - Email Verification", () => {
+  let context: AuthContext | undefined;
+  const verificationTokens = new Map<string, string>();
+
+  const requireContext = (): AuthContext => {
+    if (!context) {
+      throw new Error("Live verification context was not initialized.");
+    }
+    return context;
+  };
+
+  beforeAll(async () => {
+    context = await setupAuthContext({
+      emailAndPassword: {
+        enabled: true,
+        requireEmailVerification: true,
+      },
+      emailVerification: {
+        sendOnSignIn: false,
+        sendVerificationEmail: async ({
+          user,
+          token,
+        }: {
+          user: { email: string };
+          token: string;
+        }) => {
+          verificationTokens.set(user.email, token);
+        },
+      },
+    });
+  });
+
+  beforeEach(async () => {
+    verificationTokens.clear();
+    await requireContext().reset();
+  });
+
+  afterAll(async () => {
+    if (context) {
+      await context.closeDb();
+    }
+  });
+
+  it("blocks sign-in before verification, then allows it after verifyEmail", async () => {
+    const context = requireContext();
+    const api = context.auth.api as unknown as {
+      sendVerificationEmail: (input: { body: { email: string } }) => Promise<unknown>;
+      verifyEmail: (input: { query: { token: string } }) => Promise<{ status?: boolean }>;
+    };
+
+    const email = "verify-me@example.com";
+    const password = "VerifyPassword123!";
+
+    const signedUp = await context.auth.api.signUpEmail({
+      body: {
+        name: "Verify Me",
+        email,
+        password,
+      },
+    });
+    expect(signedUp.user.emailVerified).toBe(false);
+
+    await expect(
+      context.auth.api.signInEmail({
+        body: { email, password },
+      }),
+    ).rejects.toThrow();
+
+    await api.sendVerificationEmail({
+      body: { email },
+    });
+
+    const token = verificationTokens.get(email);
+    expect(token).toBeDefined();
+
+    const verified = await api.verifyEmail({
+      query: { token: token! },
+    });
+    expect(verified.status).toBe(true);
+
+    const dbUser = await context.adapter.findOne<Record<string, unknown>>({
+      model: "user",
+      where: [{ field: "id", operator: "eq", value: signedUp.user.id }],
+    });
+    expect(dbUser?.emailVerified).toBe(true);
+
+    const signIn = await context.auth.api.signInEmail({
+      body: { email, password },
+    });
+    expect(signIn.user.id).toBe(signedUp.user.id);
+    expect(signIn.token).toBeDefined();
   });
 });

@@ -534,6 +534,28 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           .filter((part): part is string => typeof part === "string" && part.length > 0)
           .join(" ");
 
+      const splitUpdatePayload = (update: Record<string, unknown>) => {
+        const nonNullEntries: Array<[string, unknown]> = [];
+        const noneFields: string[] = [];
+
+        for (const [field, value] of Object.entries(update)) {
+          if (value === undefined) continue;
+          if (value === null) {
+            noneFields.push(field);
+            continue;
+          }
+          nonNullEntries.push([field, value]);
+        }
+
+        return {
+          nonNullUpdate: Object.fromEntries(nonNullEntries) as Record<string, unknown>,
+          noneFields,
+        };
+      };
+
+      const buildNoneSetClause = (fields: string[]) =>
+        fields.map((field) => `${escapeIdent(field)} = NONE`).join(", ");
+
       const buildSelectQuery = ({
         columns,
         tableName,
@@ -702,14 +724,25 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         }): Promise<T | null> {
           const target = await resolveSingleRecordId(model, where);
           if (!target) return null;
-          const updateData = omitUndefinedFields(
-            toObjectRecord(update, `update payload for "${model}"`),
-          );
-          const query = "UPDATE $target MERGE $update RETURN AFTER;";
-          return await queryOne<T>(query, {
-            target,
-            update: updateData,
-          });
+          const updateData = toObjectRecord(update, `update payload for "${model}"`);
+          const { nonNullUpdate, noneFields } = splitUpdatePayload(updateData);
+
+          if (Object.keys(nonNullUpdate).length > 0) {
+            await db.query("UPDATE $target MERGE $update;", {
+              target,
+              update: nonNullUpdate,
+            });
+          }
+          if (noneFields.length > 0) {
+            const noneClause = buildNoneSetClause(noneFields);
+            await db.query(`UPDATE $target SET ${noneClause};`, { target });
+          }
+
+          if (Object.keys(nonNullUpdate).length === 0 && noneFields.length === 0) {
+            return await queryOne<T>("SELECT * FROM ONLY $target;", { target });
+          }
+
+          return await queryOne<T>("SELECT * FROM ONLY $target;", { target });
         },
 
         async updateMany({
@@ -727,12 +760,20 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
 
           const tableName = escapeIdent(model);
           const whereClause = buildWhereClause(where, model, idField);
-          const updateData = omitUndefinedFields(update);
-          const query = `UPDATE ${tableName} MERGE $update ${whereClause.clause};`;
-          await db.query(query, {
-            ...whereClause.bindings,
-            update: updateData,
-          });
+          const { nonNullUpdate, noneFields } = splitUpdatePayload(update);
+
+          if (Object.keys(nonNullUpdate).length > 0) {
+            const mergeQuery = `UPDATE ${tableName} MERGE $update ${whereClause.clause};`;
+            await db.query(mergeQuery, {
+              ...whereClause.bindings,
+              update: nonNullUpdate,
+            });
+          }
+          if (noneFields.length > 0) {
+            const noneClause = buildNoneSetClause(noneFields);
+            const setQuery = `UPDATE ${tableName} SET ${noneClause} ${whereClause.clause};`;
+            await db.query(setQuery, whereClause.bindings);
+          }
           return countBefore;
         },
 

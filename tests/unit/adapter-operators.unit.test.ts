@@ -82,7 +82,8 @@ describe("Adapter Core - CRUD Where Operators", () => {
         .mockResolvedValueOnce([[{ total: 1 }]]) // deleteMany count pass
         .mockResolvedValueOnce([[]]) // deleteMany write pass
         .mockResolvedValueOnce([[new StringRecordId("user:u-1")]]) // update target lookup
-        .mockResolvedValueOnce([[createdUser]]) // update write pass
+        .mockResolvedValueOnce([[]]) // update write pass
+        .mockResolvedValueOnce([[createdUser]]) // update read-back
         .mockResolvedValueOnce([[new StringRecordId("user:u-1")]]) // delete target lookup
         .mockResolvedValueOnce([[]]); // delete write pass
 
@@ -128,15 +129,18 @@ describe("Adapter Core - CRUD Where Operators", () => {
       });
 
       const calls = client.query.mock.calls as Array<[string, Record<string, unknown>]>;
-      expect(calls).toHaveLength(11);
+      expect(calls).toHaveLength(12);
 
       expect(calls[0]?.[0]).toMatch(token); // findOne WHERE
       expect(calls[1]?.[0]).toMatch(token); // findMany WHERE
       expect(calls[2]?.[0]).toMatch(token); // count WHERE
       expect(calls[4]?.[0]).toMatch(token); // updateMany WHERE
       expect(calls[6]?.[0]).toMatch(token); // deleteMany WHERE
-      expect(calls[7]?.[0]).toMatch(token); // update id lookup WHERE
-      expect(calls[9]?.[0]).toMatch(token); // delete id lookup WHERE
+
+      const idLookupCalls = calls.filter(([sql]) => sql.includes("SELECT VALUE id FROM user"));
+      expect(idLookupCalls).toHaveLength(2);
+      expect(idLookupCalls[0]?.[0]).toMatch(token); // update id lookup WHERE
+      expect(idLookupCalls[1]?.[0]).toMatch(token); // delete id lookup WHERE
     },
   );
 

@@ -86,6 +86,27 @@ type AdminApi = {
       role: string | string[];
     };
   }) => Promise<{ user: { id: string; email: string } & AdminFields }>;
+  setUserPassword: (input: {
+    headers?: Headers | undefined;
+    body: {
+      userId: string;
+      newPassword: string;
+    };
+  }) => Promise<{ status: boolean }>;
+  banUser: (input: {
+    headers?: Headers | undefined;
+    body: {
+      userId: string;
+      banReason?: string | undefined;
+      banExpiresIn?: number | undefined;
+    };
+  }) => Promise<{ user: { id: string; email: string } & AdminFields }>;
+  unbanUser: (input: {
+    headers?: Headers | undefined;
+    body: {
+      userId: string;
+    };
+  }) => Promise<{ user: { id: string; email: string } & AdminFields }>;
   getUser: (input: {
     headers?: Headers | undefined;
     query: {
@@ -279,6 +300,109 @@ describe("Live DB - Admin Plugin", () => {
       },
     });
     expect(fetched.role).toBe("admin");
+  });
+
+  it("allows authenticated admins to ban and unban users", async () => {
+    const context = requireContext();
+    const api = asAdminApi(context.auth.api);
+    const { headers } = await signUpAdminAndGetHeaders(
+      context,
+      api,
+      "live-admin-ban-user@example.com",
+      "live-admin-password",
+      "Live Ban Admin",
+    );
+
+    const created = await api.createUser({
+      headers,
+      body: {
+        email: "live-admin-ban-target@example.com",
+        password: "target-password",
+        name: "Ban Target",
+        role: "user",
+      },
+    });
+
+    const banned = await api.banUser({
+      headers,
+      body: {
+        userId: created.user.id,
+        banReason: "policy-test",
+        banExpiresIn: 60,
+      },
+    });
+    expect(banned.user.banned).toBe(true);
+    expect(banned.user.banReason).toBe("policy-test");
+
+    const bannedRow = await context.adapter.findOne<UserRow>({
+      model: "user",
+      where: [{ field: "id", operator: "eq", value: created.user.id }],
+    });
+    expect(bannedRow?.banned).toBe(true);
+
+    const unbanned = await api.unbanUser({
+      headers,
+      body: {
+        userId: created.user.id,
+      },
+    });
+    expect(unbanned.user.banned).toBe(false);
+
+    const unbannedRow = await context.adapter.findOne<UserRow>({
+      model: "user",
+      where: [{ field: "id", operator: "eq", value: created.user.id }],
+    });
+    expect(unbannedRow?.banned ?? false).toBe(false);
+  });
+
+  it("allows admin to reset another user's password via setUserPassword", async () => {
+    const context = requireContext();
+    const api = asAdminApi(context.auth.api);
+    const { headers } = await signUpAdminAndGetHeaders(
+      context,
+      api,
+      "live-admin-reset-password@example.com",
+      "live-admin-password",
+      "Live Reset Admin",
+    );
+
+    const targetEmail = "live-reset-target@example.com";
+    const oldPassword = "OldPassword123!";
+    const newPassword = "NewPassword123!";
+
+    const created = (await api.signUpEmail({
+      body: {
+        email: targetEmail,
+        password: oldPassword,
+        name: "Reset Target",
+      },
+    })) as { user: { id: string; email: string } & AdminFields };
+
+    const resetResult = await api.setUserPassword({
+      headers,
+      body: {
+        userId: created.user.id,
+        newPassword,
+      },
+    });
+    expect(resetResult.status).toBe(true);
+
+    await expect(
+      api.signInEmail({
+        body: {
+          email: targetEmail,
+          password: oldPassword,
+        },
+      }),
+    ).rejects.toThrow();
+
+    const newSignIn = (await api.signInEmail({
+      body: {
+        email: targetEmail,
+        password: newPassword,
+      },
+    })) as { user: { id: string; email: string } };
+    expect(newSignIn.user.id).toBe(created.user.id);
   });
 
   it("rejects protected admin endpoints when headers are missing", async () => {
