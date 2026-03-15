@@ -266,25 +266,18 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     toSQL: (ctx) => `string::ends_with(${field}, ${ctx.def(value)})`,
   });
 
-  const supportedWhereOperators = [
-    "eq",
-    "ne",
-    "lt",
-    "lte",
-    "gt",
-    "gte",
-    "in",
-    "not_in",
-    "contains",
-    "starts_with",
-    "ends_with",
-  ] as const;
-
-  type SupportedWhereOperator = (typeof supportedWhereOperators)[number];
-  const supportedWhereOperatorSet: ReadonlySet<string> = new Set(supportedWhereOperators);
-
-  const isSupportedWhereOperator = (value: unknown): value is SupportedWhereOperator =>
-    typeof value === "string" && supportedWhereOperatorSet.has(value);
+  type SupportedWhereOperator =
+    | "eq"
+    | "ne"
+    | "lt"
+    | "lte"
+    | "gt"
+    | "gte"
+    | "in"
+    | "not_in"
+    | "contains"
+    | "starts_with"
+    | "ends_with";
 
   const expectStringValue = (value: unknown, operator: "starts_with" | "ends_with"): string => {
     if (typeof value === "string") return value;
@@ -313,25 +306,32 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
 
   const resolveWhereOperator = (value: unknown): SupportedWhereOperator => {
     if (value === undefined) return "eq";
-    if (isSupportedWhereOperator(value)) return value;
+    if (value === "eq") return "eq";
+    if (value === "ne") return "ne";
+    if (value === "lt") return "lt";
+    if (value === "lte") return "lte";
+    if (value === "gt") return "gt";
+    if (value === "gte") return "gte";
+    if (value === "in") return "in";
+    if (value === "not_in") return "not_in";
+    if (value === "contains") return "contains";
+    if (value === "starts_with") return "starts_with";
+    if (value === "ends_with") return "ends_with";
     throw adapterError(`Unsupported where operator "${formatUnknown(value)}".`);
   };
 
-  const whereOperatorHandlers: Record<
-    SupportedWhereOperator,
-    (field: string, value: unknown) => Expr
-  > = {
-    eq: (field, value) => eq(field, value),
-    ne: (field, value) => ne(field, value),
-    lt: (field, value) => lt(field, value),
-    lte: (field, value) => lte(field, value),
-    gt: (field, value) => gt(field, value),
-    gte: (field, value) => gte(field, value),
-    contains: (field, value) => contains(field, value),
-    in: (field, value) => inside(field, expectArrayValue(value, "in")),
-    not_in: (field, value) => not(inside(field, expectArrayValue(value, "not_in"))),
-    starts_with: (field, value) => startsWithExpr(field, expectStringValue(value, "starts_with")),
-    ends_with: (field, value) => endsWithExpr(field, expectStringValue(value, "ends_with")),
+  const whereOperatorExpr = (operator: SupportedWhereOperator, field: string, value: unknown): Expr => {
+    if (operator === "eq") return eq(field, value);
+    if (operator === "ne") return ne(field, value);
+    if (operator === "lt") return lt(field, value);
+    if (operator === "lte") return lte(field, value);
+    if (operator === "gt") return gt(field, value);
+    if (operator === "gte") return gte(field, value);
+    if (operator === "contains") return contains(field, value);
+    if (operator === "in") return inside(field, expectArrayValue(value, "in"));
+    if (operator === "not_in") return not(inside(field, expectArrayValue(value, "not_in")));
+    if (operator === "starts_with") return startsWithExpr(field, expectStringValue(value, "starts_with"));
+    return endsWithExpr(field, expectStringValue(value, "ends_with"));
   };
 
   const generateSchemaCode = ({
@@ -496,7 +496,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           ? toRecordIdInput(item.value, expectedReferenceTable)
           : item.value;
 
-      return whereOperatorHandlers[operator](field, normalizedValue);
+      return whereOperatorExpr(operator, field, normalizedValue);
     };
 
     let condition = toConditionExpr(where[0]!);
@@ -528,15 +528,11 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         }
       };
 
-      const queryOne = async <T>(query: string, bindings: Record<string, unknown>) => {
-        const result = await db.query<QueryRows<T>>(query, bindings);
-        return toFirstRow<T>(result);
-      };
+      const queryRows = async <T>(query: string, bindings: Record<string, unknown>) =>
+        toResultRows<T>(await db.query<QueryRows<T>>(query, bindings));
 
-      const queryMany = async <T>(query: string, bindings: Record<string, unknown>) => {
-        const result = await db.query<QueryRows<T>>(query, bindings);
-        return toResultRows<T>(result);
-      };
+      const queryFirst = async <T>(query: string, bindings: Record<string, unknown>) =>
+        (await queryRows<T>(query, bindings))[0] ?? null;
 
       const selectColumns = (model: string, select?: string[]) =>
         select && select.length > 0
@@ -648,8 +644,19 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       const countRecords = async (model: string, where?: CleanedWhere[]) => {
         const { tableName, whereClause } = resolveModelQueryContext(model, where);
         const query = `SELECT count() AS total FROM ${tableName} ${whereClause.clause} GROUP ALL;`;
-        const row = await queryOne<{ total: number }>(query, whereClause.bindings);
+        const row = await queryFirst<{ total: number }>(query, whereClause.bindings);
         return Number(row?.total ?? 0);
+      };
+
+      const withCountBeforeMutation = async (
+        model: string,
+        where: CleanedWhere[],
+        mutate: (context: ReturnType<typeof resolveModelQueryContext>) => Promise<void>,
+      ) => {
+        const countBefore = await countRecords(model, where);
+        if (countBefore === 0) return 0;
+        await mutate(resolveModelQueryContext(model, where));
+        return countBefore;
       };
 
       const customAdapter: CustomAdapter = {
@@ -677,7 +684,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
             mapWritePayload(model, data as Record<string, unknown>),
           );
           const query = `CREATE ONLY ${targetExpression} CONTENT $data RETURN AFTER;`;
-          const created = await queryOne<T>(query, {
+          const created = await queryFirst<T>(query, {
             data: createData,
           });
           if (!created) throw adapterError(`Failed to create ${table} record.`);
@@ -701,7 +708,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
             whereClause: whereClause.clause,
             limitClause: "LIMIT 1",
           });
-          return await queryOne<T>(query, whereClause.bindings);
+          return await queryFirst<T>(query, whereClause.bindings);
         },
 
         async findMany<T>({
@@ -739,7 +746,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
             limitClause,
             offsetClause,
           });
-          return await queryMany<T>(query, bindings);
+          return await queryRows<T>(query, bindings);
         },
 
         async count({
@@ -777,7 +784,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
             await db.query(`UPDATE $target SET ${noneClause};`, { target });
           }
 
-          return await queryOne<T>("SELECT * FROM ONLY $target;", { target });
+          return await queryFirst<T>("SELECT * FROM ONLY $target;", { target });
         },
 
         async updateMany({
@@ -789,25 +796,22 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           where: CleanedWhere[];
           update: Record<string, unknown>;
         }): Promise<number> {
-          const countBefore = await countRecords(model, where);
-          if (countBefore === 0) return 0;
+          return withCountBeforeMutation(model, where, async ({ tableName, whereClause }) => {
+            const { nonNullUpdate, noneFields } = splitMappedUpdatePayload(model, update);
 
-          const { tableName, whereClause } = resolveModelQueryContext(model, where);
-          const { nonNullUpdate, noneFields } = splitMappedUpdatePayload(model, update);
-
-          if (Object.keys(nonNullUpdate).length > 0) {
-            const mergeQuery = `UPDATE ${tableName} MERGE $update ${whereClause.clause};`;
-            await db.query(mergeQuery, {
-              ...whereClause.bindings,
-              update: nonNullUpdate,
-            });
-          }
-          if (noneFields.length > 0) {
-            const noneClause = buildNoneSetClause(noneFields);
-            const setQuery = `UPDATE ${tableName} SET ${noneClause} ${whereClause.clause};`;
-            await db.query(setQuery, whereClause.bindings);
-          }
-          return countBefore;
+            if (Object.keys(nonNullUpdate).length > 0) {
+              const mergeQuery = `UPDATE ${tableName} MERGE $update ${whereClause.clause};`;
+              await db.query(mergeQuery, {
+                ...whereClause.bindings,
+                update: nonNullUpdate,
+              });
+            }
+            if (noneFields.length > 0) {
+              const noneClause = buildNoneSetClause(noneFields);
+              const setQuery = `UPDATE ${tableName} SET ${noneClause} ${whereClause.clause};`;
+              await db.query(setQuery, whereClause.bindings);
+            }
+          });
         },
 
         async delete({ model, where }: { model: string; where: CleanedWhere[] }): Promise<void> {
@@ -823,13 +827,10 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           model: string;
           where: CleanedWhere[];
         }): Promise<number> {
-          const countBefore = await countRecords(model, where);
-          if (countBefore === 0) return 0;
-
-          const { tableName, whereClause } = resolveModelQueryContext(model, where);
-          const query = `DELETE ${tableName} ${whereClause.clause};`;
-          await db.query(query, whereClause.bindings);
-          return countBefore;
+          return withCountBeforeMutation(model, where, async ({ tableName, whereClause }) => {
+            const query = `DELETE ${tableName} ${whereClause.clause};`;
+            await db.query(query, whereClause.bindings);
+          });
         },
 
         async createSchema({
