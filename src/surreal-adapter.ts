@@ -314,7 +314,11 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     throw adapterError(`Unsupported where operator "${formatUnknown(value)}".`);
   };
 
-  const whereOperatorExpr = (operator: SupportedWhereOperator, field: string, value: unknown): Expr => {
+  const whereOperatorExpr = (
+    operator: SupportedWhereOperator,
+    field: string,
+    value: unknown,
+  ): Expr => {
     if (operator === "eq") return eq(field, value);
     if (operator === "ne") return ne(field, value);
     if (operator === "lt") return lt(field, value);
@@ -324,7 +328,8 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     if (operator === "contains") return contains(field, value);
     if (operator === "in") return inside(field, expectArrayValue(value, "in"));
     if (operator === "not_in") return not(inside(field, expectArrayValue(value, "not_in")));
-    if (operator === "starts_with") return startsWithExpr(field, expectStringValue(value, "starts_with"));
+    if (operator === "starts_with")
+      return startsWithExpr(field, expectStringValue(value, "starts_with"));
     return endsWithExpr(field, expectStringValue(value, "ends_with"));
   };
 
@@ -342,8 +347,17 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     const lines: string[] = [];
     type SchemaTable = (typeof tables)[string];
 
+    const buildIndexName = (tableName: string, fieldName: string): string => {
+      const normalizedTable = tableName.replace(/`/g, "").toLowerCase();
+      const normalizedField = fieldName.replace(/`/g, "");
+      const capitalizedField = normalizedField
+        ? normalizedField.charAt(0).toUpperCase() + normalizedField.slice(1)
+        : "";
+      return `${normalizedTable}${capitalizedField}_idx`;
+    };
+
     const emitUniqueIndex = (tableName: string, resolvedField: string) => {
-      const indexName = `${tableName.replace(/`/g, "")}${resolvedField.replace(/`/g, "")}_idx`;
+      const indexName = buildIndexName(tableName, resolvedField);
       lines.push(
         `DEFINE INDEX OVERWRITE ${escapeIdent(indexName)} ON TABLE ${tableName} COLUMNS ${resolvedField} UNIQUE;`,
       );

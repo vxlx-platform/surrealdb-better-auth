@@ -51,7 +51,7 @@ jobs:
           fi
 
       - name: Publish to npm
-        # No NODE_AUTH_TOKEN required with OIDC. 
+        # No NODE_AUTH_TOKEN required with OIDC.
         # Provenance is automatic when using OIDC Trusted Publishing.
         run: npm publish --access public
 

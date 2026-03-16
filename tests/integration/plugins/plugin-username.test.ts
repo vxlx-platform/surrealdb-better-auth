@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { BetterAuthOptions } from "better-auth";
 import { username } from "better-auth/plugins";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
@@ -64,6 +65,39 @@ describe("Live DB - Username Plugin", () => {
 
   beforeEach(async () => {
     await requireContext().reset();
+  });
+
+  it("adds required username plugin fields to generated schema and live table metadata", async () => {
+    const context = requireContext();
+    const authOptions = context.auth.options as BetterAuthOptions;
+    const schema = await context.adapter.createSchema?.(authOptions, "username-plugin-live.surql");
+
+    expect(schema?.code).toBeDefined();
+    expect(schema?.code).toMatch(
+      /DEFINE FIELD(?: OVERWRITE)? username ON TABLE user TYPE [^;]+;/,
+    );
+    expect(schema?.code).toMatch(
+      /DEFINE FIELD(?: OVERWRITE)? displayUsername ON TABLE user TYPE [^;]+;/,
+    );
+
+    const tableInfo = await context.db.query("INFO FOR TABLE user;");
+    const fields =
+      ((tableInfo as Array<{ fields?: Record<string, string> }>)[0]?.fields as
+        | Record<string, string>
+        | undefined) ?? {};
+    const indexes =
+      ((tableInfo as Array<{ indexes?: Record<string, string> }>)[0]?.indexes as
+        | Record<string, string>
+        | undefined) ?? {};
+
+    expect(fields.username).toBeDefined();
+    expect(fields.displayUsername).toBeDefined();
+    expect(fields.username).toMatch(/DEFINE FIELD username ON user TYPE (none \| )?string\b/);
+    expect(fields.displayUsername).toMatch(
+      /DEFINE FIELD displayUsername ON user TYPE (none \| )?string\b/,
+    );
+    expect(indexes.userEmail_idx).toBeDefined();
+    expect(indexes.userUsername_idx).toBeDefined();
   });
 
   it("normalizes username on sign-up and supports sign-in by username", async () => {
