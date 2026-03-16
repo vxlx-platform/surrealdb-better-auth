@@ -7,8 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-03-16
+
+### ⚠ Breaking
+
+- Removed the `apiEndpoints` adapter option and generated `DEFINE API` schema output.
+- Removed standalone schema/migration helper public entrypoints; the package now exposes the adapter runtime surface only.
+- Removed adapter-specific migration CLI workflow from the documented/public package surface.
+- Transaction option contract is now boolean (`true` | `false`); `"auto"` is no longer a supported option.
+
 ### Changed
 
+- Adapter runtime now consistently treats Surreal string record ids (`table:id`) as the canonical boundary format across CRUD and plugin flows.
+- Runtime model/field remapping is applied end-to-end for reads, writes, filtering, sorting, and projection through Better Auth adapter mapping hooks.
+- `create` no longer accepts explicit ids; record creation always delegates id generation to SurrealDB (including configured `recordIdFormat` behavior).
+- `recordIdFormat` behavior is constrained to create-target strategy (`native`, `uuidv7`, `ulid`) and no longer implies logical-id normalization.
+- Mutation handling was hardened to map `null` to `NONE` and omit `undefined`, preventing schemafull coercion errors during update paths.
+- Transaction handling now uses Surreal SDK feature probing (`Features.Transactions`) plus transactional adapter wrapping, while preserving Better Auth fallback when disabled/unsupported.
+- Schema generation remains `DEFINE ... OVERWRITE`-based and now focuses on auth tables/fields/indexes plus optional `defineAccess` output only.
+- `defineAccess` remains the single extension point for custom `DEFINE ACCESS` output and requires static SurQL (no bound variables during schema generation).
 - Updated README to match the current runtime surface (adapter-only export, no standalone schema helper entrypoint or adapter migration CLI).
 - Removed outdated README references to deprecated/example workflows that are no longer present in this branch.
 - Clarified compatibility wording for SurrealDB JavaScript SDK v2 (client) with modern SurrealDB v3 server deployments.
