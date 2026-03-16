@@ -36,12 +36,9 @@
     "prepublishOnly": "npm run build && npm run test:unit",
     "test": "vitest run --config vitest.config.ts tests/unit",
     "test:all": "vitest run --config vitest.config.ts",
-    "test:browser:setup": "playwright install chromium",
-    "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:mock": "vitest run --config vitest.config.ts tests/unit",
     "test:unit": "vitest run --config vitest.config.ts tests/unit",
     "test:integration": "vitest run --config vitest.config.ts tests/integration",
-    "test:live": "vitest run --config vitest.config.ts tests/integration",
     "typecheck:src": "tsc --noEmit -p tsconfig.json",
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "typecheck": "bun run typecheck:src && bun run typecheck:tests"

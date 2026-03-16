@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Updated README to match the current runtime surface (adapter-only export, no standalone schema helper entrypoint or adapter migration CLI).
+- Removed outdated README references to deprecated/example workflows that are no longer present in this branch.
+- Clarified compatibility wording for SurrealDB JavaScript SDK v2 (client) with modern SurrealDB v3 server deployments.
+
 ## [0.6.0] - 2026-03-13
 
 ### ⚠ Breaking
