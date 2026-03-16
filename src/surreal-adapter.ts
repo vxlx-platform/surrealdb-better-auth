@@ -46,6 +46,9 @@ export interface SurrealAdapterConfig {
   defineAccess?: () => BoundQuery<unknown[]>;
 }
 
+const SUPPORTED_RECORD_ID_FORMATS =
+  ["native", "uuidv7", "ulid"] as const satisfies readonly RecordIdFormat[];
+
 type SchemaField = Pick<
   DBFieldAttribute,
   "type" | "required" | "unique" | "references" | "fieldName"
@@ -67,6 +70,57 @@ type TransactionRunner = Exclude<
   false
 >;
 
+type SurrealSchemaFieldType =
+  | "string"
+  | "number"
+  | "bool"
+  | "datetime"
+  | "object"
+  | "array<string>"
+  | "array<number>";
+
+const FIELD_TYPE_MAP = {
+  string: "string",
+  number: "number",
+  boolean: "bool",
+  date: "datetime",
+  json: "object",
+  "string[]": "array<string>",
+  "number[]": "array<number>",
+} as const satisfies Record<string, SurrealSchemaFieldType>;
+
+type SupportedSchemaFieldType = keyof typeof FIELD_TYPE_MAP;
+
+const isSupportedSchemaFieldType = (
+  fieldType: SchemaField["type"],
+): fieldType is SupportedSchemaFieldType => typeof fieldType === "string" && fieldType in FIELD_TYPE_MAP;
+
+const toResultRows = <T>(result: QueryRows<T>): T[] => {
+  if (result.length === 0) return [];
+  if (result.length === 1 && Array.isArray(result[0])) {
+    return result[0];
+  }
+  return result.filter((value): value is T => !Array.isArray(value));
+};
+
+const omitUndefinedFields = <T extends Record<string, unknown>>(value: T): T =>
+  Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
+
+const formatUnknown = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  if (typeof value === "symbol") return value.description ?? "symbol";
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+};
+
 /**
  * Better Auth adapter for SurrealDB.
  *
@@ -75,18 +129,26 @@ type TransactionRunner = Exclude<
  * - ID/reference inputs must be full record ids (or SDK RecordId/StringRecordId).
  */
 export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConfig = {}) => {
-  let lazyOptions: BetterAuthOptions | null = null;
-  let adapterFactoryOptions!: AdapterFactoryOptions;
+  let lazyOptions: BetterAuthOptions | undefined;
+  let adapterFactoryOptions: AdapterFactoryOptions | undefined;
 
   const adapterError = (message: string, cause?: unknown) =>
     new Error(`[surrealdb-adapter] ${message}`, cause === undefined ? undefined : { cause });
 
-  const toResultRows = <T>(result: QueryRows<T>): T[] => {
-    if (result.length === 0) return [];
-    if (result.length === 1 && Array.isArray(result[0])) {
-      return result[0];
+  const requireLazyOptions = (): BetterAuthOptions => {
+    if (!lazyOptions) {
+      throw adapterError("Adapter options were not initialized before transaction execution.");
     }
-    return result.filter((value): value is T => !Array.isArray(value));
+    return lazyOptions;
+  };
+
+  const requireAdapterFactoryOptions = (): AdapterFactoryOptions => {
+    if (!adapterFactoryOptions) {
+      throw adapterError(
+        "Adapter factory options were not initialized before transaction execution.",
+      );
+    }
+    return adapterFactoryOptions;
   };
 
   const toFirstRow = <T>(result: QueryRows<T>): T | null => {
@@ -137,7 +199,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
 
   const resolveRecordIdFormat = (resolver: RecordIdFormatResolver | undefined, model: string) => {
     const raw = typeof resolver === "function" ? resolver({ model }) : (resolver ?? "native");
-    if (raw !== "native" && raw !== "uuidv7" && raw !== "ulid") {
+    if (!SUPPORTED_RECORD_ID_FORMATS.includes(raw)) {
       throw adapterError(
         `Unsupported recordIdFormat "${String(raw)}". Supported values are "native", "uuidv7", and "ulid".`,
       );
@@ -152,32 +214,12 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     return escapedTable;
   };
 
-  const omitUndefinedFields = <T extends Record<string, unknown>>(value: T): T =>
-    Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
-
   const toObjectRecord = (value: unknown, label: string): Record<string, unknown> => {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
       throw adapterError(`Expected ${label} to be a plain object.`);
     }
     return value as Record<string, unknown>;
   };
-
-  const fieldTypeMap = {
-    string: "string",
-    number: "number",
-    boolean: "bool",
-    date: "datetime",
-    json: "object",
-    "string[]": "array<string>",
-    "number[]": "array<number>",
-  } as const;
-
-  type SupportedSchemaFieldType = keyof typeof fieldTypeMap;
-
-  const isSupportedSchemaFieldType = (
-    fieldType: SchemaField["type"],
-  ): fieldType is SupportedSchemaFieldType =>
-    typeof fieldType === "string" && fieldType in fieldTypeMap;
 
   const resolveSchemaType = (
     modelName: string,
@@ -189,7 +231,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         `Unsupported schema field type "${String(fieldType)}" for "${modelName}.${fieldName}".`,
       );
     }
-    return fieldTypeMap[fieldType];
+    return FIELD_TYPE_MAP[fieldType];
   };
 
   const schemaFieldLookupCache = new WeakMap<AdapterSchema, Map<string, ModelFieldLookup>>();
@@ -215,23 +257,17 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     getSchemaFieldLookup(schema).get(model)?.get(field) ?? field;
 
   const normalizeDateValue = (value: unknown) => {
-    const isDateTimeLike = (
-      candidate: unknown,
-    ): candidate is { constructor: { name?: string }; toString: () => string } =>
+    const hasToDate = (candidate: unknown): candidate is { toDate: () => Date } =>
       typeof candidate === "object" &&
       candidate !== null &&
-      "constructor" in candidate &&
-      typeof candidate.toString === "function" &&
-      candidate.constructor?.name === "DateTime";
+      "toDate" in candidate &&
+      typeof (candidate as { toDate?: unknown }).toDate === "function";
 
     if (value instanceof Date || value === null || value === undefined) return value;
     if (value instanceof DateTime) return value.toDate();
-    if (isDateTimeLike(value)) {
-      return new Date(value.toString());
-    }
-    if (typeof value === "string") {
-      const parsed = new Date(value);
-      return Number.isNaN(parsed.getTime()) ? value : parsed;
+    if (hasToDate(value)) {
+      const date = value.toDate();
+      return date instanceof Date ? date : value;
     }
     return value;
   };
@@ -273,6 +309,25 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     | "starts_with"
     | "ends_with";
 
+  const supportedWhereOperators = [
+    "eq",
+    "ne",
+    "lt",
+    "lte",
+    "gt",
+    "gte",
+    "in",
+    "not_in",
+    "contains",
+    "starts_with",
+    "ends_with",
+  ] as const satisfies readonly SupportedWhereOperator[];
+  const supportedWhereOperatorSet = new Set<SupportedWhereOperator>(supportedWhereOperators);
+
+  const isSupportedWhereOperator = (value: unknown): value is SupportedWhereOperator =>
+    typeof value === "string" &&
+    supportedWhereOperatorSet.has(value as SupportedWhereOperator);
+
   const expectStringValue = (value: unknown, operator: "starts_with" | "ends_with"): string => {
     if (typeof value === "string") return value;
     throw adapterError(`Operator "${operator}" requires a string value.`);
@@ -283,55 +338,34 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     throw adapterError(`Operator "${operator}" requires an array value.`);
   };
 
-  const formatUnknown = (value: unknown): string => {
-    if (typeof value === "string") return value;
-    if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-      return String(value);
-    }
-    if (typeof value === "symbol") return value.description ?? "symbol";
-    if (value === null) return "null";
-    if (value === undefined) return "undefined";
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return Object.prototype.toString.call(value);
-    }
-  };
-
   const resolveWhereOperator = (value: unknown): SupportedWhereOperator => {
     if (value === undefined) return "eq";
-    if (value === "eq") return "eq";
-    if (value === "ne") return "ne";
-    if (value === "lt") return "lt";
-    if (value === "lte") return "lte";
-    if (value === "gt") return "gt";
-    if (value === "gte") return "gte";
-    if (value === "in") return "in";
-    if (value === "not_in") return "not_in";
-    if (value === "contains") return "contains";
-    if (value === "starts_with") return "starts_with";
-    if (value === "ends_with") return "ends_with";
+    if (isSupportedWhereOperator(value)) return value;
     throw adapterError(`Unsupported where operator "${formatUnknown(value)}".`);
   };
+
+  const whereOperatorExprBuilders = {
+    eq: (field: string, value: unknown): Expr => eq(field, value),
+    ne: (field: string, value: unknown): Expr => ne(field, value),
+    lt: (field: string, value: unknown): Expr => lt(field, value),
+    lte: (field: string, value: unknown): Expr => lte(field, value),
+    gt: (field: string, value: unknown): Expr => gt(field, value),
+    gte: (field: string, value: unknown): Expr => gte(field, value),
+    contains: (field: string, value: unknown): Expr => contains(field, value),
+    in: (field: string, value: unknown): Expr => inside(field, expectArrayValue(value, "in")),
+    not_in: (field: string, value: unknown): Expr =>
+      not(inside(field, expectArrayValue(value, "not_in"))),
+    starts_with: (field: string, value: unknown): Expr =>
+      startsWithExpr(field, expectStringValue(value, "starts_with")),
+    ends_with: (field: string, value: unknown): Expr =>
+      endsWithExpr(field, expectStringValue(value, "ends_with")),
+  } as const satisfies Record<SupportedWhereOperator, (field: string, value: unknown) => Expr>;
 
   const whereOperatorExpr = (
     operator: SupportedWhereOperator,
     field: string,
     value: unknown,
-  ): Expr => {
-    if (operator === "eq") return eq(field, value);
-    if (operator === "ne") return ne(field, value);
-    if (operator === "lt") return lt(field, value);
-    if (operator === "lte") return lte(field, value);
-    if (operator === "gt") return gt(field, value);
-    if (operator === "gte") return gte(field, value);
-    if (operator === "contains") return contains(field, value);
-    if (operator === "in") return inside(field, expectArrayValue(value, "in"));
-    if (operator === "not_in") return not(inside(field, expectArrayValue(value, "not_in")));
-    if (operator === "starts_with")
-      return startsWithExpr(field, expectStringValue(value, "starts_with"));
-    return endsWithExpr(field, expectStringValue(value, "ends_with"));
-  };
+  ): Expr => whereOperatorExprBuilders[operator](field, value);
 
   const generateSchemaCode = ({
     file,
@@ -452,6 +486,8 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     resolveFieldName: (model: string, field: string) => string,
   ): { clause: string; bindings: Record<string, unknown> } => {
     if (!where?.length) return { clause: "", bindings: {} };
+    const [firstWhere, ...restWhere] = where;
+    if (!firstWhere) return { clause: "", bindings: {} };
 
     const toConditionExpr = (item: Where): Expr => {
       const dbFieldName = resolveFieldName(model, item.field);
@@ -467,10 +503,10 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       return whereOperatorExpr(operator, field, normalizedValue);
     };
 
-    let condition = toConditionExpr(where[0]!);
-    for (let index = 1; index < where.length; index += 1) {
-      const connector = where[index]?.connector === "OR" ? "OR" : "AND";
-      const next = toConditionExpr(where[index]!);
+    let condition = toConditionExpr(firstWhere);
+    for (const nextWhere of restWhere) {
+      const connector = nextWhere?.connector === "OR" ? "OR" : "AND";
+      const next = toConditionExpr(nextWhere);
       condition = connector === "OR" ? or(condition, next) : and(condition, next);
     }
 
@@ -513,20 +549,22 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           .join(" ");
 
       const splitUpdatePayload = (update: Record<string, unknown>) => {
-        const nonNullEntries: Array<[string, unknown]> = [];
+        const nonNullUpdate: Record<string, unknown> = {};
         const noneFields: string[] = [];
 
-        for (const [field, value] of Object.entries(update)) {
+        for (const field in update) {
+          if (!Object.prototype.hasOwnProperty.call(update, field)) continue;
+          const value = update[field];
           if (value === undefined) continue;
           if (value === null) {
             noneFields.push(field);
             continue;
           }
-          nonNullEntries.push([field, value]);
+          nonNullUpdate[field] = value;
         }
 
         return {
-          nonNullUpdate: Object.fromEntries(nonNullEntries) as Record<string, unknown>,
+          nonNullUpdate,
           noneFields,
         };
       };
@@ -584,12 +622,14 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
 
       const resolveSingleRecordId = async (model: string, where: Where[]) => {
         const { resolvedTableName, tableName, idField } = resolveModelQueryContext(model);
+        const [firstWhere] = where;
         const fastPath =
           where.length === 1 &&
-          resolveFieldName(model, String(where[0]?.field ?? "")) === idField &&
-          where[0]?.operator === "eq";
-        if (fastPath) {
-          return toStringRecordId(where[0]!.value, resolvedTableName);
+          firstWhere !== undefined &&
+          resolveFieldName(model, String(firstWhere.field ?? "")) === idField &&
+          firstWhere.operator === "eq";
+        if (fastPath && firstWhere) {
+          return toStringRecordId(firstWhere.value, resolvedTableName);
         }
 
         const whereClause = buildWhereClause(
@@ -824,13 +864,15 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
 
   const createTransactionRunner = (): TransactionRunner => async (callback) => {
     const tx: SurrealTransactionClient = await client.beginTransaction();
+    const currentFactoryOptions = requireAdapterFactoryOptions();
+    const options = requireLazyOptions();
     const txAdapter = createAdapterFactory({
       config: {
-        ...adapterFactoryOptions!.config,
+        ...currentFactoryOptions.config,
         transaction: false,
       },
       adapter: createCustomAdapter(tx),
-    })(lazyOptions!);
+    })(options);
 
     try {
       const result = await callback(txAdapter);

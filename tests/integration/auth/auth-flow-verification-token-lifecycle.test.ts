@@ -67,8 +67,11 @@ describe("Auth Flow - Verification Token Lifecycle", () => {
 
     const token = resetTokens.get(email.toLowerCase());
     expect(token).toBeDefined();
+    if (!token) {
+      throw new Error("Expected reset token to be generated.");
+    }
 
-    const identifier = makeResetPasswordIdentifier(token!);
+    const identifier = makeResetPasswordIdentifier(token);
 
     const verificationBefore = await context.adapter.findOne<Record<string, unknown>>({
       model: "verification",
@@ -80,7 +83,7 @@ describe("Auth Flow - Verification Token Lifecycle", () => {
 
     const reset = await context.auth.api.resetPassword({
       body: {
-        token: token!,
+        token,
         newPassword,
       },
     });

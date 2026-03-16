@@ -44,10 +44,13 @@ const getCookieHeader = (response: Response) => {
   };
   const setCookies = responseHeaders.getSetCookie?.() ?? [];
   if (setCookies.length > 0) {
-    return setCookies.map((cookie) => cookie.split(";")[0]!).join("; ");
+    return setCookies
+      .map((cookie) => cookie.split(";")[0] ?? "")
+      .filter((cookie) => cookie.length > 0)
+      .join("; ");
   }
   const single = response.headers.get("set-cookie");
-  return single ? single.split(";")[0]! : "";
+  return single ? (single.split(";")[0] ?? "") : "";
 };
 
 const decodeJwtPayload = (token: string): JwtPayload => {
