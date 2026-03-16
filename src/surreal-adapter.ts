@@ -46,8 +46,11 @@ export interface SurrealAdapterConfig {
   defineAccess?: () => BoundQuery<unknown[]>;
 }
 
-const SUPPORTED_RECORD_ID_FORMATS =
-  ["native", "uuidv7", "ulid"] as const satisfies readonly RecordIdFormat[];
+const SUPPORTED_RECORD_ID_FORMATS = [
+  "native",
+  "uuidv7",
+  "ulid",
+] as const satisfies readonly RecordIdFormat[];
 
 type SchemaField = Pick<
   DBFieldAttribute,
@@ -93,7 +96,8 @@ type SupportedSchemaFieldType = keyof typeof FIELD_TYPE_MAP;
 
 const isSupportedSchemaFieldType = (
   fieldType: SchemaField["type"],
-): fieldType is SupportedSchemaFieldType => typeof fieldType === "string" && fieldType in FIELD_TYPE_MAP;
+): fieldType is SupportedSchemaFieldType =>
+  typeof fieldType === "string" && fieldType in FIELD_TYPE_MAP;
 
 const toResultRows = <T>(result: QueryRows<T>): T[] => {
   if (result.length === 0) return [];
@@ -240,14 +244,14 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     const cached = schemaFieldLookupCache.get(schema);
     if (cached) return cached;
 
-    const lookup = new Map<string, ModelFieldLookup>();
-    for (const table of Object.values(schema)) {
-      const modelLookup: ModelFieldLookup = new Map();
-      for (const [name, attributes] of Object.entries(table.fields)) {
-        modelLookup.set(attributes.fieldName ?? name, name);
-      }
-      lookup.set(table.modelName, modelLookup);
-    }
+    const lookup = new Map<string, ModelFieldLookup>(
+      Object.values(schema).map((table) => [
+        table.modelName,
+        new Map(
+          Object.entries(table.fields).map(([name, attributes]) => [attributes.fieldName ?? name, name]),
+        ),
+      ]),
+    );
 
     schemaFieldLookupCache.set(schema, lookup);
     return lookup;
@@ -325,8 +329,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
   const supportedWhereOperatorSet = new Set<SupportedWhereOperator>(supportedWhereOperators);
 
   const isSupportedWhereOperator = (value: unknown): value is SupportedWhereOperator =>
-    typeof value === "string" &&
-    supportedWhereOperatorSet.has(value as SupportedWhereOperator);
+    typeof value === "string" && supportedWhereOperatorSet.has(value as SupportedWhereOperator);
 
   const expectStringValue = (value: unknown, operator: "starts_with" | "ends_with"): string => {
     if (typeof value === "string") return value;
@@ -424,25 +427,23 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     };
 
     const emitTableDefinition = (table: SchemaTable) => {
-      const modelName = table.modelName;
+      const { modelName } = table;
       const tableName = escapeIdent(getModelName(modelName));
       lines.push(`DEFINE TABLE OVERWRITE ${tableName} SCHEMAFULL;`);
 
-      for (const [fieldKey, field] of Object.entries(table.fields)) {
+      Object.entries(table.fields).forEach(([fieldKey, field]) =>
         emitFieldDefinition({
           modelName,
           tableName,
           fieldKey,
           field,
-        });
-      }
+        }),
+      );
 
       lines.push("");
     };
 
-    for (const table of Object.values(tables)) {
-      emitTableDefinition(table);
-    }
+    Object.values(tables).forEach(emitTableDefinition);
 
     const renderAccessStatement = () => {
       if (typeof config.defineAccess === "function") {
@@ -503,12 +504,10 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       return whereOperatorExpr(operator, field, normalizedValue);
     };
 
-    let condition = toConditionExpr(firstWhere);
-    for (const nextWhere of restWhere) {
-      const connector = nextWhere?.connector === "OR" ? "OR" : "AND";
-      const next = toConditionExpr(nextWhere);
-      condition = connector === "OR" ? or(condition, next) : and(condition, next);
-    }
+    const condition = restWhere.reduce((acc, item) => {
+      const next = toConditionExpr(item);
+      return item.connector === "OR" ? or(acc, next) : and(acc, next);
+    }, toConditionExpr(firstWhere));
 
     const whereExpr = expr(condition);
     return {
@@ -523,7 +522,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       getFieldName,
       getModelName,
     }: Parameters<NonNullable<AdapterFactoryOptions["adapter"]>>[0]) => {
-      const resolveTableName = (model: string) => getModelName(model);
+      const resolveTableName = getModelName;
       const resolveFieldName = (model: string, field: string) => {
         try {
           return getFieldName({ model, field });
@@ -549,24 +548,21 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           .join(" ");
 
       const splitUpdatePayload = (update: Record<string, unknown>) => {
-        const nonNullUpdate: Record<string, unknown> = {};
-        const noneFields: string[] = [];
-
-        for (const field in update) {
-          if (!Object.prototype.hasOwnProperty.call(update, field)) continue;
-          const value = update[field];
-          if (value === undefined) continue;
-          if (value === null) {
-            noneFields.push(field);
-            continue;
-          }
-          nonNullUpdate[field] = value;
-        }
-
-        return {
-          nonNullUpdate,
-          noneFields,
-        };
+        return Object.entries(update).reduce(
+          (acc, [field, value]) => {
+            if (value === undefined) return acc;
+            if (value === null) {
+              acc.noneFields.push(field);
+              return acc;
+            }
+            acc.nonNullUpdate[field] = value;
+            return acc;
+          },
+          {
+            nonNullUpdate: {} as Record<string, unknown>,
+            noneFields: [] as string[],
+          },
+        );
       };
 
       const mapWritePayload = (model: string, payload: Record<string, unknown>) =>
@@ -736,15 +732,16 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         }): Promise<T[]> {
           const { tableName, whereClause } = resolveModelQueryContext(model, where);
           const columns = selectColumns(model, select);
-          const bindings: Record<string, unknown> = { ...whereClause.bindings };
+          const bindings: Record<string, unknown> = {
+            ...whereClause.bindings,
+            ...(typeof limit === "number" ? { limit } : {}),
+            ...(typeof offset === "number" ? { offset } : {}),
+          };
           const orderBy = sortBy
             ? `ORDER BY ${escapeIdent(resolveFieldName(model, sortBy.field))} ${sortBy.direction.toUpperCase()}`
             : undefined;
           const limitClause = typeof limit === "number" ? "LIMIT $limit" : undefined;
           const offsetClause = typeof offset === "number" ? "START $offset" : undefined;
-
-          if (typeof limit === "number") bindings.limit = limit;
-          if (typeof offset === "number") bindings.offset = offset;
 
           const query = buildSelectQuery({
             columns,
@@ -757,7 +754,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           return await queryRows<T>(query, bindings);
         },
 
-        async count({
+        count({
           model,
           where,
         }: {

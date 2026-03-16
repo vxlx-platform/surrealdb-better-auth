@@ -81,20 +81,23 @@ describe("Auth Flow - Session Management", () => {
       where: [{ field: "userId", operator: "eq", value: userId }],
     });
 
-    const sessions: TestSession[] = [];
-    for (let i = 0; i < count; i += 1) {
-      const loginResponse = await ctx.auth.api.signInEmail({
-        body: {
-          email,
-          password: "session-test-password-123",
-        },
-        asResponse: true,
-      });
-      const loginBody = (await loginResponse.json()) as { token: string };
-      const headers = new Headers();
-      setCookieToHeader(headers)({ response: loginResponse });
-      sessions.push({ headers, token: loginBody.token });
-    }
+    const sessions = await Array.from({ length: count }).reduce<Promise<TestSession[]>>(
+      async (sessionsPromise) => {
+        const existingSessions = await sessionsPromise;
+        const loginResponse = await ctx.auth.api.signInEmail({
+          body: {
+            email,
+            password: "session-test-password-123",
+          },
+          asResponse: true,
+        });
+        const loginBody = (await loginResponse.json()) as { token: string };
+        const headers = new Headers();
+        setCookieToHeader(headers)({ response: loginResponse });
+        return [...existingSessions, { headers, token: loginBody.token }];
+      },
+      Promise.resolve([]),
+    );
 
     return { sessions, userId };
   };
