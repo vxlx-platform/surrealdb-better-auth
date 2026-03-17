@@ -12,9 +12,7 @@ const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
 const RANDOM_ID_REGEX = /^[a-zA-Z0-9]+$/;
 
 type RecordIdFormat = "native" | "ulid" | "uuidv7";
-type RecordIdFormatResolver =
-  | RecordIdFormat
-  | ((input: { model: string }) => RecordIdFormat);
+type RecordIdFormatResolver = RecordIdFormat | ((input: { model: string }) => RecordIdFormat);
 
 type BuiltFormatCase = {
   auth: ReturnType<typeof betterAuth>;
@@ -49,26 +47,26 @@ describe("Live DB - Adapter Record ID Formats", () => {
     return db;
   };
 
-  const setupFormatCase = async (recordIdFormat: RecordIdFormatResolver): Promise<BuiltFormatCase> => {
-    const auth = betterAuth(
-      {
-        baseURL: "http://127.0.0.1:3000",
-        secret: "01234567890123456789012345678901",
-        emailAndPassword: {
-          enabled: true,
-          password: {
-            hash: async (password) => password,
-            verify: async ({ hash, password }) => hash === password,
-          },
-        },
-        database: surrealAdapter(requireDb(), { recordIdFormat }),
-        advanced: {
-          database: {
-            generateId: false,
-          },
+  const setupFormatCase = async (
+    recordIdFormat: RecordIdFormatResolver,
+  ): Promise<BuiltFormatCase> => {
+    const auth = betterAuth({
+      baseURL: "http://127.0.0.1:3000",
+      secret: "01234567890123456789012345678901",
+      emailAndPassword: {
+        enabled: true,
+        password: {
+          hash: async (password) => password,
+          verify: async ({ hash, password }) => hash === password,
         },
       },
-    ) as ReturnType<typeof betterAuth>;
+      database: surrealAdapter(requireDb(), { recordIdFormat }),
+      advanced: {
+        database: {
+          generateId: false,
+        },
+      },
+    }) as ReturnType<typeof betterAuth>;
 
     const options = auth.options as BetterAuthOptions;
     const factory = options.database as DBAdapterInstance;

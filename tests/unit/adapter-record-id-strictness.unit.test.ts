@@ -1,13 +1,14 @@
 import type { DBAdapterInstance } from "@better-auth/core/db/adapter";
 import type { BetterAuthOptions } from "better-auth";
 import { betterAuth } from "better-auth";
-import { DateTime, RecordId, StringRecordId } from "surrealdb";
+import { BoundQuery, DateTime, RecordId, StringRecordId } from "surrealdb";
 import { describe, expect, it, vi } from "vitest";
 
 import { surrealAdapter } from "../../src";
 
 type MockClient = {
   query: ReturnType<typeof vi.fn>;
+  create: ReturnType<typeof vi.fn>;
   beginTransaction: ReturnType<typeof vi.fn>;
   isFeatureSupported: ReturnType<typeof vi.fn>;
 };
@@ -24,8 +25,25 @@ const createAdapter = (client: MockClient) => {
   return factory(options);
 };
 
+const createMockCreateQuery = () => {
+  let data: unknown;
+  return {
+    content(value: unknown) {
+      data = value;
+      return this;
+    },
+    output() {
+      return this;
+    },
+    compile() {
+      return new BoundQuery("CREATE ONLY user CONTENT $data RETURN AFTER;", { data });
+    },
+  };
+};
+
 const createMockClient = (queryResult: unknown = [[]]): MockClient => ({
   query: vi.fn().mockResolvedValue(queryResult),
+  create: vi.fn(() => createMockCreateQuery()),
   beginTransaction: vi.fn(),
   isFeatureSupported: vi.fn(() => false),
 });
@@ -210,6 +228,51 @@ describe("Adapter Core - Record ID Strictness", () => {
 
     expect(createClient.query).not.toHaveBeenCalled();
     expect(updateClient.query).not.toHaveBeenCalled();
+  });
+
+  it("cannot bypass create id enforcement by supplying explicit primary ids", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      const client = createMockClient([
+        [
+          {
+            id: new StringRecordId("user:generated-1"),
+            email: "manual-id@example.com",
+            name: "Manual Id",
+            emailVerified: false,
+            createdAt: new DateTime("2026-03-13T12:00:00.000Z"),
+            updatedAt: new DateTime("2026-03-13T12:00:00.000Z"),
+          },
+        ],
+      ]);
+      const adapter = createAdapter(client);
+
+      const created = await adapter.create<Record<string, unknown>>({
+        model: "user",
+        data: {
+          id: "user:manual-id-1",
+          email: "manual-id@example.com",
+          name: "Manual Id",
+          emailVerified: false,
+          createdAt: sessionDate,
+          updatedAt: sessionDate,
+        },
+      });
+
+      expect(client.query).toHaveBeenCalledTimes(1);
+      const [, bindings] = client.query.mock.calls[0] as [
+        string,
+        { data: Record<string, unknown> },
+      ];
+      expect(bindings.data.id).toBeUndefined();
+      expect(String(created.id)).toBe("user:generated-1");
+      expect(String(created.id)).not.toBe("user:manual-id-1");
+    } finally {
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
+    }
   });
 
   it('rejects invalid record-id entries inside "in" arrays for id and reference filters', async () => {

@@ -1,15 +1,32 @@
 import type { DBAdapterInstance } from "@better-auth/core/db/adapter";
 import type { BetterAuthOptions } from "better-auth";
 import { betterAuth } from "better-auth";
-import { DateTime, RecordId } from "surrealdb";
+import { BoundQuery, DateTime, RecordId } from "surrealdb";
 import { describe, expect, it, vi } from "vitest";
 
 import { surrealAdapter } from "../../src";
 
 type MockClient = {
   query: ReturnType<typeof vi.fn>;
+  create: ReturnType<typeof vi.fn>;
   beginTransaction: ReturnType<typeof vi.fn>;
   isFeatureSupported: ReturnType<typeof vi.fn>;
+};
+
+const createMockCreateQuery = () => {
+  let data: unknown;
+  return {
+    content(value: unknown) {
+      data = value;
+      return this;
+    },
+    output() {
+      return this;
+    },
+    compile() {
+      return new BoundQuery("CREATE ONLY user CONTENT $data RETURN AFTER;", { data });
+    },
+  };
 };
 
 const createMockClient = (): MockClient => ({
@@ -24,6 +41,7 @@ const createMockClient = (): MockClient => ({
       },
     ],
   ]),
+  create: vi.fn(() => createMockCreateQuery()),
   beginTransaction: vi.fn(),
   isFeatureSupported: vi.fn(() => false),
 });

@@ -1,19 +1,21 @@
 import type { DBAdapterInstance } from "@better-auth/core/db/adapter";
 import type { BetterAuthOptions } from "better-auth";
 import { betterAuth } from "better-auth";
-import { DateTime, RecordId } from "surrealdb";
+import { BoundQuery, DateTime, RecordId } from "surrealdb";
 import { describe, expect, it, vi } from "vitest";
 
 import { surrealAdapter } from "../../src";
 
 type MockTransaction = {
   query: ReturnType<typeof vi.fn>;
+  create: ReturnType<typeof vi.fn>;
   commit: ReturnType<typeof vi.fn>;
   cancel: ReturnType<typeof vi.fn>;
 };
 
 type MockClient = {
   query: ReturnType<typeof vi.fn>;
+  create: ReturnType<typeof vi.fn>;
   beginTransaction?: ReturnType<typeof vi.fn>;
   isFeatureSupported?: ReturnType<typeof vi.fn>;
 };
@@ -50,8 +52,27 @@ const createUserData = () => ({
 
 const canonicalUserId = new RecordId("user", "tx-user").toString();
 
+const createMockCreateQuery = () => {
+  let data: unknown;
+  return {
+    content(value: unknown) {
+      data = value;
+      return this;
+    },
+    output() {
+      return this;
+    },
+    compile() {
+      return new BoundQuery("CREATE ONLY user CONTENT $data RETURN AFTER;", { data });
+    },
+  };
+};
+
+const createMockCreate = () => vi.fn(() => createMockCreateQuery());
+
 const createMockTransaction = (): MockTransaction => ({
   query: vi.fn().mockResolvedValue([[createdUserRow()]]),
+  create: createMockCreate(),
   commit: vi.fn().mockResolvedValue(undefined),
   cancel: vi.fn().mockResolvedValue(undefined),
 });
@@ -61,6 +82,7 @@ describe("Adapter Core - Transactions", () => {
     const tx = createMockTransaction();
     const client = {
       query: vi.fn(),
+      create: createMockCreate(),
       beginTransaction: vi.fn().mockResolvedValue(tx),
       isFeatureSupported: vi.fn(() => true),
     } satisfies MockClient;
@@ -85,6 +107,7 @@ describe("Adapter Core - Transactions", () => {
     const tx = createMockTransaction();
     const client = {
       query: vi.fn(),
+      create: createMockCreate(),
       beginTransaction: vi.fn().mockResolvedValue(tx),
       isFeatureSupported: vi.fn(() => true),
     } satisfies MockClient;
@@ -110,6 +133,7 @@ describe("Adapter Core - Transactions", () => {
 
     const client = {
       query: vi.fn(),
+      create: createMockCreate(),
       beginTransaction: vi.fn().mockResolvedValue(tx),
       isFeatureSupported: vi.fn(() => true),
     } satisfies MockClient;
@@ -131,6 +155,7 @@ describe("Adapter Core - Transactions", () => {
   it("falls back to non-transaction path when feature support is disabled", async () => {
     const client = {
       query: vi.fn().mockResolvedValue([[createdUserRow()]]),
+      create: createMockCreate(),
       beginTransaction: vi.fn(),
       isFeatureSupported: vi.fn(() => false),
     } satisfies MockClient;
@@ -153,6 +178,7 @@ describe("Adapter Core - Transactions", () => {
   it("can be force-disabled even when feature support is reported as true", async () => {
     const client = {
       query: vi.fn().mockResolvedValue([[createdUserRow()]]),
+      create: createMockCreate(),
       beginTransaction: vi.fn(),
       isFeatureSupported: vi.fn(() => true),
     } satisfies MockClient;
@@ -175,6 +201,7 @@ describe("Adapter Core - Transactions", () => {
     const callback = vi.fn(async () => "ok");
     const client = {
       query: vi.fn(),
+      create: createMockCreate(),
       beginTransaction: vi.fn().mockRejectedValue(new Error("init tx failed")),
       isFeatureSupported: vi.fn(() => true),
     } satisfies MockClient;
@@ -189,6 +216,7 @@ describe("Adapter Core - Transactions", () => {
     tx.commit.mockRejectedValueOnce(new Error("commit failed"));
     const client = {
       query: vi.fn(),
+      create: createMockCreate(),
       beginTransaction: vi.fn().mockResolvedValue(tx),
       isFeatureSupported: vi.fn(() => true),
     } satisfies MockClient;
@@ -211,6 +239,7 @@ describe("Adapter Core - Transactions", () => {
     tx.cancel.mockRejectedValueOnce(new Error("cancel failed"));
     const client = {
       query: vi.fn(),
+      create: createMockCreate(),
       beginTransaction: vi.fn().mockResolvedValue(tx),
       isFeatureSupported: vi.fn(() => true),
     } satisfies MockClient;
@@ -229,6 +258,7 @@ describe("Adapter Core - Transactions", () => {
   it("falls back to non-transaction path when beginTransaction is unavailable", async () => {
     const client = {
       query: vi.fn().mockResolvedValue([[createdUserRow()]]),
+      create: createMockCreate(),
       isFeatureSupported: vi.fn(() => true),
     } satisfies MockClient;
     const adapter = createAdapter(client, { transaction: true });
@@ -250,6 +280,7 @@ describe("Adapter Core - Transactions", () => {
     const tx = createMockTransaction();
     const client = {
       query: vi.fn(),
+      create: createMockCreate(),
       beginTransaction: vi.fn().mockResolvedValue(tx),
     } satisfies MockClient;
     const adapter = createAdapter(client, { transaction: true });
