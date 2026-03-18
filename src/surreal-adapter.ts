@@ -31,8 +31,8 @@ import {
   or,
 } from "surrealdb";
 
-type SurrealClient = Pick<Surreal, "query" | "create" | "beginTransaction" | "isFeatureSupported">;
-type SurrealQueryClient = Pick<SurrealClient, "query" | "create">;
+type SurrealClient = Pick<Surreal, "query" | "beginTransaction" | "isFeatureSupported">;
+type SurrealQueryClient = Pick<SurrealClient, "query">;
 type SurrealTransactionClient = Awaited<ReturnType<SurrealClient["beginTransaction"]>>;
 
 type RecordIdFormat = "native" | "uuidv7" | "ulid";
@@ -268,6 +268,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     for (const [field, value] of Object.entries(update)) {
       if (value === undefined) continue;
       if (value === null) {
+        // SurrealDB uses NONE to unset a field; null would keep a persisted null.
         assignments.push(`${toEscapedFieldIdent(field)} = NONE`);
         continue;
       }
@@ -435,31 +436,57 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         return query;
       };
 
+      const buildWhereScopedQuery = (
+        baseQuery: string,
+        whereClause: BoundQuery,
+        bindings?: Record<string, unknown>,
+      ) => {
+        const query = new BoundQuery(baseQuery, bindings);
+        return appendWhereClause(query, whereClause);
+      };
+
+      const buildMutationQuery = ({
+        baseQuery,
+        whereClause,
+        bindings,
+        returning,
+      }: {
+        baseQuery: string;
+        whereClause: BoundQuery;
+        bindings?: Record<string, unknown>;
+        returning?: "AFTER" | "BEFORE";
+      }) => {
+        const query = buildWhereScopedQuery(baseQuery, whereClause, bindings);
+        query.append(returning ? ` RETURN ${returning};` : ";");
+        return query;
+      };
+
       const buildSelectColumns = (model: string, select?: string[]) =>
         select && select.length > 0
           ? select.map((field) => toEscapedFieldIdent(resolveFieldName(model, field))).join(", ")
           : "*";
 
       const resolveModelQueryContext = (model: string, where?: CleanedWhere[]) => {
-        const resolvedTableName = resolveTableName(model);
-        const tableName = toTableIdent(resolvedTableName);
+        const tableName = toTableIdent(resolveTableName(model));
         const whereClause = buildWhereClause(where);
-        return { resolvedTableName, tableName, whereClause };
+        return { tableName, whereClause };
       };
 
       const buildSelectQuery = (model: string, select?: string[], where?: CleanedWhere[]) => {
         const { tableName, whereClause } = resolveModelQueryContext(model, where);
-        const query = new BoundQuery(
+        const query = buildWhereScopedQuery(
           `SELECT ${buildSelectColumns(model, select)} FROM ${tableName}`,
+          whereClause,
         );
-        appendWhereClause(query, whereClause);
         return query;
       };
 
       const countRecords = async (model: string, where?: CleanedWhere[]) => {
         const { tableName, whereClause } = resolveModelQueryContext(model, where);
-        const query = new BoundQuery(`SELECT count() AS total FROM ${tableName}`);
-        appendWhereClause(query, whereClause);
+        const query = buildWhereScopedQuery(
+          `SELECT count() AS total FROM ${tableName}`,
+          whereClause,
+        );
         query.append(" GROUP ALL;");
 
         const row = await execQueryFirst<{ total: number }>(query);
@@ -571,9 +598,12 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
             return await execQueryFirst<T>(existing);
           }
 
-          const query = new BoundQuery(`UPDATE ${tableName} SET ${setClause}`, bindings);
-          appendWhereClause(query, whereClause);
-          query.append(" RETURN AFTER;");
+          const query = buildMutationQuery({
+            baseQuery: `UPDATE ${tableName} SET ${setClause}`,
+            whereClause,
+            bindings,
+            returning: "AFTER",
+          });
           return await execQueryFirst<T>(query);
         },
 
@@ -590,9 +620,12 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           const { setClause, bindings } = buildUpdateSetStatement(update);
           if (!setClause) return 0;
 
-          const query = new BoundQuery(`UPDATE ${tableName} SET ${setClause}`, bindings);
-          appendWhereClause(query, whereClause);
-          query.append(" RETURN AFTER;");
+          const query = buildMutationQuery({
+            baseQuery: `UPDATE ${tableName} SET ${setClause}`,
+            whereClause,
+            bindings,
+            returning: "AFTER",
+          });
           const updated = await execQuery<Record<string, unknown>>(query);
           return updated.length;
         },
@@ -601,8 +634,11 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           const { tableName, whereClause } = resolveModelQueryContext(model, where);
           const idField = toEscapedFieldIdent(resolveFieldName(model, "id"));
 
-          const target = new BoundQuery(`SELECT VALUE ${idField} FROM ${tableName}`);
-          appendWhereClause(target, whereClause);
+          // DELETE has no LIMIT clause; constrain single-row behavior via target subquery.
+          const target = buildWhereScopedQuery(
+            `SELECT VALUE ${idField} FROM ${tableName}`,
+            whereClause,
+          );
           target.append(" LIMIT 1");
 
           const query = new BoundQuery(`DELETE (${target.query});`, target.bindings);
@@ -617,9 +653,11 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           where: CleanedWhere[];
         }): Promise<number> {
           const { tableName, whereClause } = resolveModelQueryContext(model, where);
-          const query = new BoundQuery(`DELETE ${tableName}`);
-          appendWhereClause(query, whereClause);
-          query.append(" RETURN BEFORE;");
+          const query = buildMutationQuery({
+            baseQuery: `DELETE ${tableName}`,
+            whereClause,
+            returning: "BEFORE",
+          });
           const deleted = await execQuery<Record<string, unknown>>(query);
           return deleted.length;
         },
@@ -695,6 +733,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         }
 
         if (field === "id") {
+          // Keep SurrealDB as source of truth for record-id generation on create.
           if (action === "create") return undefined;
           return toRecordIdInput(data, currentTable);
         }
