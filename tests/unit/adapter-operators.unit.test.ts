@@ -1,7 +1,7 @@
 import type { DBAdapterInstance, Where } from "@better-auth/core/db/adapter";
 import type { BetterAuthOptions } from "better-auth";
 import { betterAuth } from "better-auth";
-import { RecordId, StringRecordId } from "surrealdb";
+import { RecordId } from "surrealdb";
 import { describe, expect, it, vi } from "vitest";
 
 import { surrealAdapter } from "../../src";
@@ -78,10 +78,8 @@ describe("Adapter Core - CRUD Where Operators", () => {
         .mockResolvedValueOnce([[]]) // findMany
         .mockResolvedValueOnce([[{ total: 0 }]]) // count
         .mockResolvedValueOnce([[]]) // updateMany write pass
-        .mockResolvedValueOnce([[{ total: 1 }]]) // deleteMany count pass
         .mockResolvedValueOnce([[]]) // deleteMany write pass
         .mockResolvedValueOnce([[createdUser]]) // update write pass
-        .mockResolvedValueOnce([[new StringRecordId("user:u-1")]]) // delete target lookup
         .mockResolvedValueOnce([[]]); // delete write pass
 
       const adapter = createAdapter(client);
@@ -126,18 +124,15 @@ describe("Adapter Core - CRUD Where Operators", () => {
       });
 
       const calls = client.query.mock.calls as Array<[string, Record<string, unknown>]>;
-      expect(calls).toHaveLength(9);
+      expect(calls).toHaveLength(7);
 
       expect(calls[0]?.[0]).toMatch(token); // findOne WHERE
       expect(calls[1]?.[0]).toMatch(token); // findMany WHERE
       expect(calls[2]?.[0]).toMatch(token); // count WHERE
       expect(calls[3]?.[0]).toMatch(token); // updateMany WHERE
-      expect(calls[5]?.[0]).toMatch(token); // deleteMany WHERE
-      expect(calls[6]?.[0]).toMatch(token); // update WHERE
-
-      const idLookupCalls = calls.filter(([sql]) => sql.includes("SELECT VALUE id FROM user"));
-      expect(idLookupCalls).toHaveLength(1);
-      expect(idLookupCalls[0]?.[0]).toMatch(token); // delete id lookup WHERE
+      expect(calls[4]?.[0]).toMatch(token); // deleteMany WHERE
+      expect(calls[5]?.[0]).toMatch(token); // update WHERE
+      expect(calls[6]?.[0]).toMatch(token); // delete subquery WHERE
     },
   );
 

@@ -29,8 +29,6 @@ import {
   ne,
   not,
   or,
-  raw,
-  surql,
 } from "surrealdb";
 
 type SurrealClient = Pick<Surreal, "query" | "create" | "beginTransaction" | "isFeatureSupported">;
@@ -61,16 +59,6 @@ type SchemaField = Pick<
 >;
 
 type QueryRows<T> = T[] | [T[]];
-
-type AdapterSchema = Record<
-  string,
-  {
-    modelName: string;
-    fields: Record<string, { fieldName?: string }>;
-  }
->;
-
-type ModelFieldLookup = Map<string, string>;
 type TransactionRunner = Exclude<
   NonNullable<AdapterFactoryOptions["config"]["transaction"]>,
   false
@@ -111,8 +99,7 @@ const toResultRows = <T>(result: QueryRows<T>): T[] => {
 };
 
 const toTableIdent = (table: string) => new Table(table).toString();
-const toFieldIdent = (field: string) => field;
-const toEscapedFieldIdent = (field: string) => escapeIdent(toFieldIdent(field));
+const toEscapedFieldIdent = (field: string) => escapeIdent(field);
 
 export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConfig = {}) => {
   let lazyOptions: BetterAuthOptions | undefined;
@@ -196,31 +183,6 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     }
     return FIELD_TYPE_MAP[fieldType];
   };
-
-  const schemaFieldLookupCache = new WeakMap<AdapterSchema, Map<string, ModelFieldLookup>>();
-
-  const getSchemaFieldLookup = (schema: AdapterSchema): Map<string, ModelFieldLookup> => {
-    const cached = schemaFieldLookupCache.get(schema);
-    if (cached) return cached;
-
-    const lookup = new Map<string, ModelFieldLookup>(
-      Object.values(schema).map((table) => [
-        table.modelName,
-        new Map(
-          Object.entries(table.fields).map(([name, attributes]) => [
-            attributes.fieldName ?? name,
-            name,
-          ]),
-        ),
-      ]),
-    );
-
-    schemaFieldLookupCache.set(schema, lookup);
-    return lookup;
-  };
-
-  const resolveDefaultFieldName = (schema: AdapterSchema, model: string, field: string) =>
-    getSchemaFieldLookup(schema).get(model)?.get(field) ?? field;
 
   const normalizeDateValue = (value: unknown) =>
     value instanceof DateTime ? value.toDate() : value;
@@ -478,14 +440,11 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           ? select.map((field) => toEscapedFieldIdent(resolveFieldName(model, field))).join(", ")
           : "*";
 
-      const idFieldForModel = (model: string) => resolveFieldName(model, "id");
-
       const resolveModelQueryContext = (model: string, where?: CleanedWhere[]) => {
         const resolvedTableName = resolveTableName(model);
         const tableName = toTableIdent(resolvedTableName);
-        const idField = idFieldForModel(model);
         const whereClause = buildWhereClause(where);
-        return { resolvedTableName, tableName, idField, whereClause };
+        return { resolvedTableName, tableName, whereClause };
       };
 
       const buildSelectQuery = (model: string, select?: string[], where?: CleanedWhere[]) => {
@@ -497,36 +456,6 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         return query;
       };
 
-      const resolveSingleRecordId = async (model: string, where: CleanedWhere[]) => {
-        const { resolvedTableName, tableName, idField, whereClause } = resolveModelQueryContext(
-          model,
-          where,
-        );
-
-        const firstWhere = where[0];
-
-        const fastPath =
-          where.length === 1 &&
-          firstWhere !== undefined &&
-          String(firstWhere.field ?? "") === idField &&
-          firstWhere.operator === "eq";
-
-        if (fastPath && firstWhere) {
-          return toStringRecordId(firstWhere.value, resolvedTableName);
-        }
-
-        const query = new BoundQuery(
-          `SELECT VALUE ${toEscapedFieldIdent(idField)} FROM ${tableName}`,
-        );
-        appendWhereClause(query, whereClause);
-        query.append(" LIMIT 1;");
-
-        const rows = await execQuery<StringRecordId | RecordId | string>(query);
-        const first = rows[0] ?? null;
-        if (!first) return null;
-        return toStringRecordId(first, resolvedTableName);
-      };
-
       const countRecords = async (model: string, where?: CleanedWhere[]) => {
         const { tableName, whereClause } = resolveModelQueryContext(model, where);
         const query = new BoundQuery(`SELECT count() AS total FROM ${tableName}`);
@@ -534,18 +463,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         query.append(" GROUP ALL;");
 
         const row = await execQueryFirst<{ total: number }>(query);
-        return Number(row?.total ?? 0);
-      };
-
-      const withCountBeforeMutation = async (
-        model: string,
-        where: CleanedWhere[],
-        mutate: (context: ReturnType<typeof resolveModelQueryContext>) => Promise<void>,
-      ) => {
-        const countBefore = await countRecords(model, where);
-        if (countBefore === 0) return 0;
-        await mutate(resolveModelQueryContext(model, where));
-        return countBefore;
+        return row?.total ?? 0;
       };
 
       const customAdapter: CustomAdapter = {
@@ -668,28 +586,27 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           where: CleanedWhere[];
           update: Record<string, unknown>;
         }): Promise<number> {
-          return withCountBeforeMutation(
-            model,
-            where,
-            async ({ resolvedTableName, whereClause }) => {
-              const { setClause, bindings } = buildUpdateSetStatement(update);
-              if (!setClause) return;
+          const { tableName, whereClause } = resolveModelQueryContext(model, where);
+          const { setClause, bindings } = buildUpdateSetStatement(update);
+          if (!setClause) return 0;
 
-              const query = new BoundQuery(
-                `UPDATE ${toTableIdent(resolvedTableName)} SET ${setClause}`,
-                bindings,
-              );
-              appendWhereClause(query, whereClause);
-              query.append(";");
-              await execQuery(query);
-            },
-          );
+          const query = new BoundQuery(`UPDATE ${tableName} SET ${setClause}`, bindings);
+          appendWhereClause(query, whereClause);
+          query.append(" RETURN AFTER;");
+          const updated = await execQuery<Record<string, unknown>>(query);
+          return updated.length;
         },
 
         async delete({ model, where }: { model: string; where: CleanedWhere[] }): Promise<void> {
-          const target = await resolveSingleRecordId(model, where);
-          if (!target) return;
-          await execQuery(surql`DELETE ${target}`);
+          const { tableName, whereClause } = resolveModelQueryContext(model, where);
+          const idField = toEscapedFieldIdent(resolveFieldName(model, "id"));
+
+          const target = new BoundQuery(`SELECT VALUE ${idField} FROM ${tableName}`);
+          appendWhereClause(target, whereClause);
+          target.append(" LIMIT 1");
+
+          const query = new BoundQuery(`DELETE (${target.query});`, target.bindings);
+          await execQuery(query);
         },
 
         async deleteMany({
@@ -699,12 +616,12 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           model: string;
           where: CleanedWhere[];
         }): Promise<number> {
-          return withCountBeforeMutation(model, where, async ({ tableName, whereClause }) => {
-            const query = surql`DELETE ${raw(tableName)}`;
-            appendWhereClause(query, whereClause);
-            query.append(";");
-            await execQuery(query);
-          });
+          const { tableName, whereClause } = resolveModelQueryContext(model, where);
+          const query = new BoundQuery(`DELETE ${tableName}`);
+          appendWhereClause(query, whereClause);
+          query.append(" RETURN BEFORE;");
+          const deleted = await execQuery<Record<string, unknown>>(query);
+          return deleted.length;
         },
 
         async createSchema({
@@ -770,40 +687,34 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       customTransformInput: ({ data, field, fieldAttributes, model, schema, action }) => {
         if (data === undefined || data === null) return data;
 
-        const typedSchema = schema as AdapterSchema;
-        const defaultField = resolveDefaultFieldName(typedSchema, model, field);
-        if (action === "create" && defaultField === "id") {
-          throw adapterError(
-            `forceAllowId is not supported for model "${model}". Let SurrealDB generate the record id.`,
-          );
-        }
+        const tables = schema as BetterAuthDBSchema;
+        const currentTable = tables[model]?.modelName ?? model;
 
         if (fieldAttributes.type === "date" && data instanceof Date) {
           return new DateTime(data);
         }
 
-        if (defaultField === "id") {
-          return toRecordIdInput(data, model);
+        if (field === "id") {
+          if (action === "create") return undefined;
+          return toRecordIdInput(data, currentTable);
         }
 
         if (fieldAttributes.references?.field === "id") {
-          const targetModel = typedSchema[fieldAttributes.references.model]?.modelName;
-          if (!targetModel) return data;
-          return toRecordIdInput(data, targetModel);
+          const targetTable = tables[fieldAttributes.references.model]?.modelName;
+          if (!targetTable) return data;
+          return toRecordIdInput(data, targetTable);
         }
 
         return data;
       },
-      customTransformOutput: ({ data, field, fieldAttributes, model, schema }) => {
+      customTransformOutput: ({ data, field, fieldAttributes }) => {
         if (data === undefined || data === null) return data;
 
         if (fieldAttributes.type === "date") {
           return normalizeDateValue(data);
         }
 
-        const typedSchema = schema as AdapterSchema;
-        const defaultField = resolveDefaultFieldName(typedSchema, model, field);
-        const isIdLikeField = defaultField === "id" || fieldAttributes.references?.field === "id";
+        const isIdLikeField = field === "id" || fieldAttributes.references?.field === "id";
         if (!isIdLikeField) return data;
 
         return normalizeRecordIdValue(data);
