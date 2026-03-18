@@ -41,7 +41,6 @@ type RecordIdFormatResolver = RecordIdFormat | ((input: { model: string }) => Re
 
 export interface SurrealAdapterConfig {
   debugLogs?: DBAdapterDebugLogOption;
-  usePlural?: boolean;
   transaction?: boolean;
   recordIdFormat?: RecordIdFormatResolver;
   defineAccess?: () => BoundQuery<unknown[]>;
@@ -715,7 +714,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     config: {
       adapterId: "surrealdb",
       adapterName: "SurrealDB Adapter",
-      usePlural: config.usePlural ?? false,
+      usePlural: false,
       debugLogs: config.debugLogs ?? false,
       supportsJSON: true,
       supportsArrays: true,
