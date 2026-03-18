@@ -425,13 +425,11 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     return client.isFeatureSupported(Features.Transactions);
   };
 
-  const buildWhereExpr = (where: CleanedWhere[] | undefined): Expr | undefined => {
-    if (!where || where.length === 0) return undefined;
+  const buildWhereClause = (where: CleanedWhere[] | undefined): BoundQuery => {
+    if (!where || where.length === 0) return new BoundQuery("");
 
     const firstWhere = where[0];
-    if (!firstWhere) return undefined;
-
-    const restWhere = where.slice(1);
+    if (!firstWhere) return new BoundQuery("");
 
     const toConditionExpr = (item: CleanedWhere): Expr => {
       const field = toEscapedFieldIdent(item.field);
@@ -439,17 +437,12 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       return whereOperatorExpr(operator, field, item.value);
     };
 
-    const condition = restWhere.reduce((acc, item) => {
+    const condition = where.slice(1).reduce((acc, item) => {
       const next = toConditionExpr(item);
       return item.connector === "OR" ? or(acc, next) : and(acc, next);
     }, toConditionExpr(firstWhere));
 
-    return condition;
-  };
-
-  const toWhereClause = (whereExpr: Expr | undefined): BoundQuery => {
-    if (!whereExpr) return new BoundQuery("");
-    const compiled = expr(whereExpr);
+    const compiled = expr(condition);
     if (!compiled.query) return new BoundQuery("");
     return new BoundQuery(`WHERE ${compiled.query}`, compiled.bindings);
   };
@@ -491,7 +484,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         const resolvedTableName = resolveTableName(model);
         const tableName = toTableIdent(resolvedTableName);
         const idField = idFieldForModel(model);
-        const whereClause = toWhereClause(buildWhereExpr(where));
+        const whereClause = buildWhereClause(where);
         return { resolvedTableName, tableName, idField, whereClause };
       };
 
