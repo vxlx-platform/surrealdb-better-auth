@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-03-18
+
+### ⚠ Breaking
+
+- Removed `usePlural` from `SurrealAdapterConfig`; pluralized table naming is no longer configurable.
+- Adapter factory now hard-codes `usePlural: false` for a single singular-table contract.
+
+### Changed
+
+- Refactored adapter query execution around SurrealDB `BoundQuery` composition, with a unified where-clause pipeline shared across `find`, `count`, `update`, and `delete` paths.
+- Refactored mutation implementation to favor SurrealDB-native `SET` semantics for updates (`null` -> `NONE`) and explicit `RETURN AFTER/BEFORE` count/result behavior.
+- Simplified single-record delete flow to SurrealDB-native target subquery selection (`SELECT VALUE id ... LIMIT 1`) before `DELETE`, preserving deterministic one-record behavior.
+- Reduced adapter boilerplate by consolidating internal query builders/helpers and removing redundant defensive wrappers.
+- Updated README to a concise runtime-focused guide and added explicit `defineAccess` example usage.
+- Added safe Surreal client cleanup (`close()` in `finally`) in JWT access integration coverage.
+- Tightened integration assertions for duplicate-email signup behavior and admin unauthorized endpoint checks.
+- Tightened UUIDv7 integration validation to assert version-7 UUID format explicitly.
+- Reduced expected-noise stderr output in negative auth-path integration tests via targeted console error suppression helpers.
+
 ## [0.7.0] - 2026-03-16
 
 ### ⚠ Breaking
