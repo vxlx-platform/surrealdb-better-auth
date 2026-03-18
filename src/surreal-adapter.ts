@@ -119,20 +119,9 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
   const adapterError = (message: string, cause?: unknown) =>
     new Error(`[surrealdb-adapter] ${message}`, cause === undefined ? undefined : { cause });
 
-  const requireLazyOptions = (): BetterAuthOptions => {
-    if (!lazyOptions) {
-      throw adapterError("Adapter options were not initialized before transaction execution.");
-    }
-    return lazyOptions;
-  };
-
-  const requireAdapterFactoryOptions = (): AdapterFactoryOptions => {
-    if (!adapterFactoryOptions) {
-      throw adapterError(
-        "Adapter factory options were not initialized before transaction execution.",
-      );
-    }
-    return adapterFactoryOptions;
+  const requireOptions = <T>(value: T | undefined, name: string): T => {
+    if (!value) throw adapterError(`${name} was not initialized before transaction execution.`);
+    return value;
   };
 
   const toStringRecordId = (value: unknown, expectedTable?: string): StringRecordId => {
@@ -504,7 +493,8 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
 
       const buildSelectQuery = (model: string, select?: string[], where?: CleanedWhere[]) => {
         const { tableName, whereClause } = resolveModelQueryContext(model, where);
-        const query = surql`SELECT ${buildSelectColumns(model, select)} FROM ${raw(tableName)}`;
+        const table = new Table(tableName);
+        const query = surql`SELECT ${buildSelectColumns(model, select)} FROM ${table}`;
         appendWhereClause(query, whereClause);
         return query;
       };
@@ -572,10 +562,9 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
 
           const query = new BoundQuery(
             `CREATE ONLY ${createTargetExpression(table, format)} CONTENT $data RETURN AFTER;`,
-            {
-              data,
-            },
+            { data },
           );
+
           const created = await execQueryFirst<T>(query);
           if (!created) throw adapterError(`Failed to create ${table} record.`);
           return created;
@@ -740,8 +729,8 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
 
   const createTransactionRunner = (): TransactionRunner => async (callback) => {
     const tx: SurrealTransactionClient = await client.beginTransaction();
-    const currentFactoryOptions = requireAdapterFactoryOptions();
-    const options = requireLazyOptions();
+    const currentFactoryOptions = requireOptions(adapterFactoryOptions, "Adapter factory options");
+    const options = requireOptions(lazyOptions, "Adapter options");
     const txAdapter = createAdapterFactory({
       config: {
         ...currentFactoryOptions.config,
