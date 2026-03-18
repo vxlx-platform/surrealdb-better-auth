@@ -298,7 +298,7 @@ describe("Live DB - JWT JWKS Surreal Access", () => {
       expect(result?.authTable).toBe("user");
       expect(result?.access).toBe(accessName);
     } finally {
-      // await surrealClient.close();
+      await surrealClient.close().catch(() => {});
     }
   });
 

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";
+import { withSuppressedConsoleError } from "../../__helpers__/suppress-console-error";
 
 const makeResetPasswordIdentifier = (token: string) => `reset-password:${token}`;
 
@@ -95,14 +96,18 @@ describe("Auth Flow - Verification Token Lifecycle", () => {
     });
     expect(verificationAfter).toBeNull();
 
-    await expect(
-      context.auth.api.signInEmail({
-        body: {
-          email,
-          password: oldPassword,
-        },
-      }),
-    ).rejects.toThrow();
+    await withSuppressedConsoleError(
+      async () =>
+        await expect(
+          context.auth.api.signInEmail({
+            body: {
+              email,
+              password: oldPassword,
+            },
+          }),
+        ).rejects.toThrow(),
+      /invalid password/i,
+    );
 
     const signIn = await context.auth.api.signInEmail({
       body: {
@@ -127,11 +132,15 @@ describe("Auth Flow - Verification Token Lifecycle", () => {
     const context = requireContext();
     const unknownEmail = "unknown-reset@example.com";
 
-    const requested = await context.auth.api.requestPasswordReset({
-      body: {
-        email: unknownEmail,
-      },
-    });
+    const requested = await withSuppressedConsoleError(
+      async () =>
+        await context.auth.api.requestPasswordReset({
+          body: {
+            email: unknownEmail,
+          },
+        }),
+      /reset password:\s*user not found/i,
+    );
     expect(requested.status).toBe(true);
     expect(resetTokens.get(unknownEmail.toLowerCase())).toBeUndefined();
 

@@ -5,6 +5,7 @@ import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";
 import { startTestServer } from "../../__helpers__/server";
 import type { RunningTestServer } from "../../__helpers__/server";
+import { withSuppressedConsoleError } from "../../__helpers__/suppress-console-error";
 
 type ChangePasswordMethod = (input: {
   headers: Headers;
@@ -111,14 +112,18 @@ describe("Auth Flow - Email/Password", () => {
     expect(signIn.user.id).toBe(signUp.user.id);
     expect(signIn.user.email).toBe(email);
 
-    await expect(
-      context.auth.api.signInEmail({
-        body: {
-          email,
-          password: "invalid-password",
-        },
-      }),
-    ).rejects.toThrow();
+    await withSuppressedConsoleError(
+      async () =>
+        await expect(
+          context.auth.api.signInEmail({
+            body: {
+              email,
+              password: "invalid-password",
+            },
+          }),
+        ).rejects.toThrow(),
+      /invalid password/i,
+    );
   });
 
   it("rejects duplicate email sign-up with a unique constraint error", async () => {
@@ -133,15 +138,25 @@ describe("Auth Flow - Email/Password", () => {
       },
     });
 
-    await expect(
-      context.auth.api.signUpEmail({
-        body: {
-          email,
-          password: "second-password",
-          name: "Second User",
-        },
-      }),
-    ).rejects.toThrow();
+    const duplicateResponse = (await context.auth.api.signUpEmail({
+      body: {
+        email,
+        password: "second-password",
+        name: "Second User",
+      },
+      asResponse: true,
+    })) as Response;
+
+    expect(duplicateResponse.status).toBeGreaterThanOrEqual(400);
+
+    const duplicatePayload = (await duplicateResponse.json()) as Record<string, unknown>;
+    expect(JSON.stringify(duplicatePayload).toLowerCase()).toMatch(/exist|duplicate|already|unique/);
+
+    const persistedCount = await context.adapter.count({
+      model: "user",
+      where: [{ field: "email", operator: "eq", value: email }],
+    });
+    expect(persistedCount).toBe(1);
   });
 
   it("allows a user to update their own password via changePassword", async () => {
@@ -176,14 +191,18 @@ describe("Auth Flow - Email/Password", () => {
     expect(changed.user.id).toBe(signUp.user.id);
     expect(changed.token).toBeDefined();
 
-    await expect(
-      context.auth.api.signInEmail({
-        body: {
-          email,
-          password: currentPassword,
-        },
-      }),
-    ).rejects.toThrow();
+    await withSuppressedConsoleError(
+      async () =>
+        await expect(
+          context.auth.api.signInEmail({
+            body: {
+              email,
+              password: currentPassword,
+            },
+          }),
+        ).rejects.toThrow(),
+      /invalid password/i,
+    );
 
     const nextSignIn = await context.auth.api.signInEmail({
       body: {

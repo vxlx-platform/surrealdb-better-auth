@@ -137,7 +137,13 @@ describe("Feature - Secondary Storage Sessions", () => {
       const queried = await ctx.db.query<unknown[] | [unknown[]]>("SELECT * FROM session;");
       const first = queried[0];
       rawSessions = Array.isArray(first) ? first : queried;
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isMissingSessionTable =
+        /session/i.test(message) && /(does not exist|not found|unknown table|missing)/i.test(message);
+      if (!isMissingSessionTable) {
+        throw error;
+      }
       rawSessions = [];
     }
     expect(rawSessions).toHaveLength(0);

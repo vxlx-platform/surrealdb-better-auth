@@ -7,7 +7,7 @@ import { surrealAdapter } from "../../../src";
 import { createTestDbConnection, truncateAuthTables } from "../../__helpers__/db";
 import { buildUserSeed } from "../../__helpers__/fixtures";
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_V7_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
 const RANDOM_ID_REGEX = /^[a-zA-Z0-9]+$/;
 
@@ -123,14 +123,14 @@ describe("Live DB - Adapter Record ID Formats", () => {
       },
     });
 
-    expect(UUID_REGEX.test(parseRecordIdPart(result.user.id))).toBe(true);
+    expect(UUID_V7_REGEX.test(parseRecordIdPart(result.user.id))).toBe(true);
 
     const sessions = await built.adapter.findMany<Record<string, unknown>>({
       model: "session",
       where: [{ field: "userId", operator: "eq", value: result.user.id }],
     });
     expect(sessions).toHaveLength(1);
-    expect(UUID_REGEX.test(parseRecordIdPart(String(sessions[0]?.id)))).toBe(true);
+    expect(UUID_V7_REGEX.test(parseRecordIdPart(String(sessions[0]?.id)))).toBe(true);
   });
 
   it("creates user and session record ids with ULID format", async () => {
@@ -183,7 +183,7 @@ describe("Live DB - Adapter Record ID Formats", () => {
       },
     });
 
-    expect(UUID_REGEX.test(parseRecordIdPart(result.user.id))).toBe(true);
+    expect(UUID_V7_REGEX.test(parseRecordIdPart(result.user.id))).toBe(true);
 
     const accounts = await built.adapter.findMany<Record<string, unknown>>({
       model: "account",

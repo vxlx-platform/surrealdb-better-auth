@@ -6,6 +6,9 @@ import { adminAc, userAc } from "better-auth/plugins/admin/access";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";
+import { startTestServer } from "../../__helpers__/server";
+import type { RunningTestServer } from "../../__helpers__/server";
+import { withSuppressedConsoleError } from "../../__helpers__/suppress-console-error";
 
 type AdminFields = {
   role?: string;
@@ -153,17 +156,25 @@ const signUpAdminAndGetHeaders = async (
   const headers = new Headers();
   setCookieToHeader(headers)({ response: signInResponse });
 
-  return { headers, signUpUser: body.user };
+  return { headers };
 };
 
 describe("Live DB - Admin Plugin", () => {
   let context: AuthContext | undefined;
+  let server: RunningTestServer | undefined;
 
   const requireContext = (): AuthContext => {
     if (!context) {
       throw new Error("Live admin context was not initialized.");
     }
     return context;
+  };
+
+  const requireServer = (): RunningTestServer => {
+    if (!server) {
+      throw new Error("Live admin server was not initialized.");
+    }
+    return server;
   };
 
   beforeAll(async () => {
@@ -181,9 +192,13 @@ describe("Live DB - Admin Plugin", () => {
         testUtils(),
       ],
     });
+    server = await startTestServer(requireContext().auth);
   });
 
   afterAll(async () => {
+    if (server) {
+      await server.stop();
+    }
     if (context) {
       await context.closeDb();
     }
@@ -387,14 +402,18 @@ describe("Live DB - Admin Plugin", () => {
     });
     expect(resetResult.status).toBe(true);
 
-    await expect(
-      api.signInEmail({
-        body: {
-          email: targetEmail,
-          password: oldPassword,
-        },
-      }),
-    ).rejects.toThrow();
+    await withSuppressedConsoleError(
+      async () =>
+        await expect(
+          api.signInEmail({
+            body: {
+              email: targetEmail,
+              password: oldPassword,
+            },
+          }),
+        ).rejects.toThrow(),
+      /invalid password/i,
+    );
 
     const newSignIn = (await api.signInEmail({
       body: {
@@ -406,24 +425,23 @@ describe("Live DB - Admin Plugin", () => {
   });
 
   it("rejects protected admin endpoints when headers are missing", async () => {
-    const context = requireContext();
-    const api = asAdminApi(context.auth.api);
+    const base = requireServer().url("/api/auth/admin");
 
-    await expect(
-      api.listUsers({
-        query: {
-          limit: 10,
-        },
-      }),
-    ).rejects.toThrow();
+    const listUsersResponse = await fetch(`${base}/list-users?limit=10`, {
+      method: "GET",
+      signal: AbortSignal.timeout(5_000),
+    });
+    expect([401, 403]).toContain(listUsersResponse.status);
 
-    await expect(
-      api.setRole({
-        body: {
-          userId: "user:missing",
-          role: "admin",
-        },
+    const setRoleResponse = await fetch(`${base}/set-role`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        userId: "user:missing",
+        role: "admin",
       }),
-    ).rejects.toThrow();
+      signal: AbortSignal.timeout(5_000),
+    });
+    expect([401, 403]).toContain(setRoleResponse.status);
   });
 });

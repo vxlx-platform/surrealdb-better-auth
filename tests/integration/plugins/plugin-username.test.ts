@@ -4,6 +4,7 @@ import { username } from "better-auth/plugins";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";
+import { withSuppressedConsoleError } from "../../__helpers__/suppress-console-error";
 
 type UsernameFields = {
   username?: string;
@@ -184,14 +185,18 @@ describe("Live DB - Username Plugin", () => {
       }),
     ).rejects.toThrow();
 
-    await expect(
-      api.signInUsername({
-        body: {
-          username: "duplicate_user",
-          password: "wrong-password",
-        },
-      }),
-    ).rejects.toThrow();
+    await withSuppressedConsoleError(
+      async () =>
+        await expect(
+          api.signInUsername({
+            body: {
+              username: "duplicate_user",
+              password: "wrong-password",
+            },
+          }),
+        ).rejects.toThrow(),
+      /invalid password/i,
+    );
   });
 
   it("rejects invalid username format", async () => {
