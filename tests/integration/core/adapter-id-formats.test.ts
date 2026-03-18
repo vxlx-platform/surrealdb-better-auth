@@ -100,6 +100,19 @@ describe("Live DB - Adapter Record ID Formats", () => {
     }
   });
 
+  it("creates user with ULID id format", async () => {
+    const built = await setupFormatCase("ulid");
+    const result = await built.auth.api.signUpEmail({
+      body: {
+        name: "ULID User",
+        email: "ulid.user@example.com",
+        password: "password1234",
+      },
+    });
+
+    expect(ULID_REGEX.test(parseRecordIdPart(result.user.id))).toBe(true);
+  });
+
   it("creates user and session record ids with UUID format", async () => {
     const built = await setupFormatCase("uuidv7");
     const result = await built.auth.api.signUpEmail({

@@ -19,6 +19,7 @@ import {
   and,
   contains,
   eq,
+  escapeIdent,
   expr,
   gt,
   gte,
@@ -111,6 +112,7 @@ const toResultRows = <T>(result: QueryRows<T>): T[] => {
 
 const toTableIdent = (table: string) => new Table(table).toString();
 const toFieldIdent = (field: string) => field;
+const toEscapedFieldIdent = (field: string) => escapeIdent(toFieldIdent(field));
 
 export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConfig = {}) => {
   let lazyOptions: BetterAuthOptions | undefined;
@@ -175,7 +177,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     return raw;
   };
 
-  const createTargetExpression = (table: string, format: RecordIdFormat) => {
+  const createTargetExpression = (table: string, format: RecordIdFormat): string => {
     const escapedTable = toTableIdent(table);
     if (format === "uuidv7") return `${escapedTable}:uuid()`;
     if (format === "ulid") return `${escapedTable}:ulid()`;
@@ -304,12 +306,12 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     for (const [field, value] of Object.entries(update)) {
       if (value === undefined) continue;
       if (value === null) {
-        assignments.push(`${toFieldIdent(field)} = NONE`);
+        assignments.push(`${toEscapedFieldIdent(field)} = NONE`);
         continue;
       }
 
       const key = `update_${index++}`;
-      assignments.push(`${toFieldIdent(field)} = $${key}`);
+      assignments.push(`${toEscapedFieldIdent(field)} = $${key}`);
       bindings[key] = value;
     }
 
@@ -368,7 +370,9 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         const dbFieldName = field.fieldName ?? fieldKey;
         if (dbFieldName === "id") return [];
 
-        const resolvedField = getFieldName({ model: table.modelName, field: dbFieldName });
+        const resolvedField = toEscapedFieldIdent(
+          getFieldName({ model: table.modelName, field: dbFieldName }),
+        );
         const fieldType = field.references
           ? `record<${toTableIdent(getModelName(field.references.model))}>`
           : resolveSchemaType(table.modelName, dbFieldName, field.type);
@@ -377,7 +381,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         if (!field.unique) return [fieldDefinition];
 
         const indexName = buildIndexName(tableName, resolvedField);
-        const indexDefinition = `DEFINE INDEX OVERWRITE ${indexName} ON TABLE ${tableName} COLUMNS ${resolvedField} UNIQUE;`;
+        const indexDefinition = `DEFINE INDEX OVERWRITE ${escapeIdent(indexName)} ON TABLE ${tableName} COLUMNS ${resolvedField} UNIQUE;`;
         return [fieldDefinition, indexDefinition];
       });
 
@@ -430,7 +434,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     const restWhere = where.slice(1);
 
     const toConditionExpr = (item: CleanedWhere): Expr => {
-      const field = toFieldIdent(item.field);
+      const field = toEscapedFieldIdent(item.field);
       const operator = resolveWhereOperator(item.operator);
       return whereOperatorExpr(operator, field, item.value);
     };
@@ -478,8 +482,8 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
 
       const buildSelectColumns = (model: string, select?: string[]) =>
         select && select.length > 0
-          ? raw(select.map((field) => toFieldIdent(resolveFieldName(model, field))).join(", "))
-          : raw("*");
+          ? select.map((field) => toEscapedFieldIdent(resolveFieldName(model, field))).join(", ")
+          : "*";
 
       const idFieldForModel = (model: string) => resolveFieldName(model, "id");
 
@@ -493,8 +497,9 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
 
       const buildSelectQuery = (model: string, select?: string[], where?: CleanedWhere[]) => {
         const { tableName, whereClause } = resolveModelQueryContext(model, where);
-        const table = new Table(tableName);
-        const query = surql`SELECT ${buildSelectColumns(model, select)} FROM ${table}`;
+        const query = new BoundQuery(
+          `SELECT ${buildSelectColumns(model, select)} FROM ${tableName}`,
+        );
         appendWhereClause(query, whereClause);
         return query;
       };
@@ -517,7 +522,9 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           return toStringRecordId(firstWhere.value, resolvedTableName);
         }
 
-        const query = new BoundQuery(`SELECT VALUE ${toFieldIdent(idField)} FROM ${tableName}`);
+        const query = new BoundQuery(
+          `SELECT VALUE ${toEscapedFieldIdent(idField)} FROM ${tableName}`,
+        );
         appendWhereClause(query, whereClause);
         query.append(" LIMIT 1;");
 
@@ -603,9 +610,9 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           const query = buildSelectQuery(model, select, where);
 
           if (sortBy) {
-            const sortField = raw(toFieldIdent(resolveFieldName(model, sortBy.field)));
-            const direction = raw(sortBy.direction.toUpperCase());
-            query.append(surql` ORDER BY ${sortField} ${direction}`);
+            const sortField = toEscapedFieldIdent(resolveFieldName(model, sortBy.field));
+            const direction = sortBy.direction === "desc" ? "DESC" : "ASC";
+            query.append(new BoundQuery(` ORDER BY ${sortField} ${direction}`));
           }
 
           if (typeof limit === "number") {
@@ -639,22 +646,23 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           where: CleanedWhere[];
           update: T;
         }): Promise<T | null> {
-          const target = await resolveSingleRecordId(model, where);
-          if (!target) return null;
-
           if (typeof update !== "object" || update === null || Array.isArray(update)) {
             throw adapterError(`Expected update payload for "${model}" to be a plain object.`);
           }
 
+          const { tableName, whereClause } = resolveModelQueryContext(model, where);
           const { setClause, bindings } = buildUpdateSetStatement(
             update as Record<string, unknown>,
           );
-          if (!setClause) return await execQueryFirst<T>(surql`SELECT * FROM ONLY ${target}`);
+          if (!setClause) {
+            const existing = buildSelectQuery(model, undefined, where);
+            existing.append(" LIMIT 1;");
+            return await execQueryFirst<T>(existing);
+          }
 
-          const query = new BoundQuery(
-            `UPDATE ${target.toString()} SET ${setClause} RETURN AFTER;`,
-            bindings,
-          );
+          const query = new BoundQuery(`UPDATE ${tableName} SET ${setClause}`, bindings);
+          appendWhereClause(query, whereClause);
+          query.append(" RETURN AFTER;");
           return await execQueryFirst<T>(query);
         },
 
