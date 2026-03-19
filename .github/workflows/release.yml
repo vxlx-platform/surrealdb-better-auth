@@ -1,9 +1,10 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: ["Tag"]
+    types:
+      - completed
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -14,49 +15,62 @@ permissions:
 
 jobs:
   publish:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null 2>&1; then
+            echo "Tag $TAG does not exist -- version was not bumped, skipping release."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Bun
+        if: steps.tag.outputs.exists == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
       - name: Setup Node.js
+        if: steps.tag.outputs.exists == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 24
           registry-url: "https://registry.npmjs.org/"
 
       - name: Install dependencies
+        if: steps.tag.outputs.exists == 'true'
         run: bun install --frozen-lockfile
 
       - name: Build
+        if: steps.tag.outputs.exists == 'true'
         run: bun run build
 
       - name: Run unit tests
+        if: steps.tag.outputs.exists == 'true'
         run: bun run test:unit
-
-      - name: Verify tag matches package version
-        run: |
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-
-          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
-            echo "Tag version ($TAG_VERSION) does not match package.json version ($PACKAGE_VERSION)"
-            exit 1
-          fi
 
       - name: Publish to npm
         # No NODE_AUTH_TOKEN required with OIDC.
         # Provenance is automatic when using OIDC Trusted Publishing.
+        if: steps.tag.outputs.exists == 'true'
         run: npm publish --provenance --access public
 
       - name: Create GitHub Release
+        if: steps.tag.outputs.exists == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ steps.tag.outputs.tag }}
           generate_release_notes: true
