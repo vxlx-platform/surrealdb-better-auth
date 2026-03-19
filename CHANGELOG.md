@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-03-19
+
+### ⚠ Breaking
+
+- Redefined single-record adapter mutations around a strict SurrealDB-first contract: `update()` and `delete()` now use `ONLY <table> WHERE ...` semantics instead of resolving a target record id first.
+- Removed the adapter-side single-record target lookup fallback for non-id predicates; singularity is now expected to come from SurrealDB schema/index guarantees on Better Auth single-record fields.
+
+### Changed
+
+- Refactored single-record `update()` to execute table-scoped `UPDATE ONLY <table> ... WHERE ... RETURN AFTER` directly.
+- Refactored single-record `delete()` to execute table-scoped `DELETE ONLY <table> ... WHERE ... RETURN BEFORE` directly.
+- Removed `resolveSingleTargetRecordId` and the extra `SELECT VALUE id ... LIMIT 1` round trip from single-record mutation paths.
+- Realigned unit and integration coverage around the new baseline where SurrealDB enforces one-record mutation cardinality through `ONLY` plus schema uniqueness.
+
 ## [0.8.0] - 2026-03-18
 
 ### ⚠ Breaking

@@ -79,8 +79,8 @@ describe("Adapter Core - CRUD Where Operators", () => {
         .mockResolvedValueOnce([[{ total: 0 }]]) // count
         .mockResolvedValueOnce([[]]) // updateMany write pass
         .mockResolvedValueOnce([[]]) // deleteMany write pass
-        .mockResolvedValueOnce([[createdUser]]) // update write pass
-        .mockResolvedValueOnce([[]]); // delete write pass
+        .mockResolvedValueOnce([[createdUser]]) // update ONLY table WHERE
+        .mockResolvedValueOnce([[]]); // delete ONLY table WHERE
 
       const adapter = createAdapter(client);
       const where: Where[] = [{ field, operator, value }];
@@ -132,9 +132,67 @@ describe("Adapter Core - CRUD Where Operators", () => {
       expect(calls[3]?.[0]).toMatch(token); // updateMany WHERE
       expect(calls[4]?.[0]).toMatch(token); // deleteMany WHERE
       expect(calls[5]?.[0]).toMatch(token); // update WHERE
-      expect(calls[6]?.[0]).toMatch(token); // delete subquery WHERE
+      expect(calls[5]?.[0]).toContain("UPDATE ONLY user");
+      expect(calls[6]?.[0]).toMatch(token); // delete WHERE
+      expect(calls[6]?.[0]).toContain("DELETE ONLY user");
     },
   );
+
+  it("uses ONLY table-scoped single-record mutations for id equality predicates", async () => {
+    const client = createClient();
+    client.query
+      .mockResolvedValueOnce([[createdUser]]) // update ONLY
+      .mockResolvedValueOnce([[]]); // delete ONLY
+
+    const adapter = createAdapter(client);
+    const where: Where[] = [{ field: "id", operator: "eq", value: "user:u-1" }];
+
+    await adapter.update({
+      model: "user",
+      where,
+      update: { name: "Updated" },
+    });
+
+    await adapter.delete({
+      model: "user",
+      where,
+    });
+
+    const calls = client.query.mock.calls as Array<[string, Record<string, unknown>]>;
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.[0]).toContain("UPDATE ONLY user");
+    expect(calls[0]?.[0]).toMatch(/WHERE .* = \$bind__/);
+    expect(calls[1]?.[0]).toContain("DELETE ONLY user");
+    expect(calls[1]?.[0]).toMatch(/WHERE .* = \$bind__/);
+  });
+
+  it("uses ONLY table-scoped single-record mutations for non-id predicates", async () => {
+    const client = createClient();
+    client.query
+      .mockResolvedValueOnce([[createdUser]]) // update ONLY
+      .mockResolvedValueOnce([[]]); // delete ONLY
+
+    const adapter = createAdapter(client);
+    const where: Where[] = [{ field: "name", operator: "eq", value: "Alice" }];
+
+    await adapter.update({
+      model: "user",
+      where,
+      update: { name: "Updated" },
+    });
+
+    await adapter.delete({
+      model: "user",
+      where,
+    });
+
+    const calls = client.query.mock.calls as Array<[string, Record<string, unknown>]>;
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.[0]).toContain("UPDATE ONLY user");
+    expect(calls[0]?.[0]).toMatch(/WHERE .* = \$bind__/);
+    expect(calls[1]?.[0]).toContain("DELETE ONLY user");
+    expect(calls[1]?.[0]).toMatch(/WHERE .* = \$bind__/);
+  });
 
   it("supports mixed AND/OR connectors in one where clause", async () => {
     const client = createClient();

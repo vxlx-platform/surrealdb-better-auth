@@ -39,6 +39,7 @@ export const auth = betterAuth({
 - Strict id/reference inputs: `RecordId`, `StringRecordId`, or `table:id`
 - SurrealDB-native UUIDv7 and ULID support
 - Rejects bare ids and wrong-table references
+- Single-record `update()` / `delete()` use SurrealDB `ONLY ... WHERE ...`, so fields used as single-record lookup keys should be uniquely indexed
 - Better Auth transaction support via SurrealDB session transactions
 - Schema generation support with optional `defineAccess` for fine-grained access control
 
