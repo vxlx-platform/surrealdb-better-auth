@@ -53,7 +53,7 @@ jobs:
       - name: Publish to npm
         # No NODE_AUTH_TOKEN required with OIDC.
         # Provenance is automatic when using OIDC Trusted Publishing.
-        run: npm publish --access public
+        run: npm publish --provenance --access public
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
