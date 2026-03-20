@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { setCookieToHeader } from "better-auth/cookies";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";
@@ -67,34 +66,19 @@ describe("Auth Flow - Session Management", () => {
   const createUserWithSessions = async (count: number) => {
     const ctx = requireContext();
     const email = `session-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-    const signUp = await ctx.auth.api.signUpEmail({
-      body: {
-        email,
-        password: "session-test-password-123",
-        name: "Session Test User",
-      },
-    });
-
-    const userId = signUp.user.id;
-    await ctx.adapter.deleteMany({
-      model: "session",
-      where: [{ field: "userId", operator: "eq", value: userId }],
-    });
+    const user = ctx.test.createUser({
+      email,
+      name: "Session Test User",
+    }) as Record<string, unknown>;
+    delete user.image;
+    const savedUser = await ctx.test.saveUser(user as never);
+    const userId = savedUser.id;
 
     const sessions = await Array.from({ length: count }).reduce<Promise<TestSession[]>>(
       async (sessionsPromise) => {
         const existingSessions = await sessionsPromise;
-        const loginResponse = await ctx.auth.api.signInEmail({
-          body: {
-            email,
-            password: "session-test-password-123",
-          },
-          asResponse: true,
-        });
-        const loginBody = (await loginResponse.json()) as { token: string };
-        const headers = new Headers();
-        setCookieToHeader(headers)({ response: loginResponse });
-        return [...existingSessions, { headers, token: loginBody.token }];
+        const login = await ctx.test.login({ userId });
+        return [...existingSessions, { headers: login.headers, token: login.token }];
       },
       Promise.resolve([]),
     );

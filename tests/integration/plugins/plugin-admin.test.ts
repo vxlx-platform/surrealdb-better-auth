@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { BetterAuthOptions } from "better-auth";
-import { setCookieToHeader } from "better-auth/cookies";
-import { admin, testUtils } from "better-auth/plugins";
+import { admin } from "better-auth/plugins";
 import { adminAc, userAc } from "better-auth/plugins/admin/access";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
@@ -145,16 +144,7 @@ const signUpAdminAndGetHeaders = async (
     where: [{ field: "id", operator: "eq", value: body.user.id }],
     update: { role: "admin" },
   });
-
-  const signInResponse = (await api.signInEmail({
-    body: {
-      email,
-      password,
-    },
-    asResponse: true,
-  })) as Response;
-  const headers = new Headers();
-  setCookieToHeader(headers)({ response: signInResponse });
+  const headers = await context.test.getAuthHeaders({ userId: body.user.id });
 
   return { headers };
 };
@@ -189,7 +179,6 @@ describe("Live DB - Admin Plugin", () => {
             admin: adminAc,
           },
         }),
-        testUtils(),
       ],
     });
     server = await startTestServer(requireContext().auth);

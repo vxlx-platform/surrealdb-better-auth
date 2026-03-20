@@ -1,6 +1,7 @@
 import type { DBAdapter, DBAdapterInstance } from "@better-auth/core/db/adapter";
 import { betterAuth } from "better-auth";
 import type { BetterAuthOptions } from "better-auth";
+import { testUtils } from "better-auth/plugins";
 import { Surreal } from "surrealdb";
 
 import { surrealAdapter } from "../../src";
@@ -8,6 +9,7 @@ import { createTestDbConnection, truncateAuthTables } from "./db";
 
 type SetupAuthContextOptions = {
   plugins?: BetterAuthOptions["plugins"];
+  disabledPaths?: BetterAuthOptions["disabledPaths"];
   emailAndPassword?: BetterAuthOptions["emailAndPassword"];
   emailVerification?: BetterAuthOptions["emailVerification"];
   session?: BetterAuthOptions["session"];
@@ -49,7 +51,13 @@ const createAuth = (db: Surreal, options?: SetupAuthContextOptions) =>
         ...options?.emailAndPassword?.password,
       },
     },
-    ...(options?.plugins ? { plugins: options.plugins } : {}),
+    plugins: [
+      ...(options?.plugins ?? []),
+      ...((options?.plugins ?? []).some((plugin) => plugin.id === "test-utils")
+        ? []
+        : [testUtils({ captureOTP: true })]),
+    ],
+    ...(options?.disabledPaths ? { disabledPaths: options.disabledPaths } : {}),
     ...(options?.emailVerification ? { emailVerification: options.emailVerification } : {}),
     ...(options?.session ? { session: options.session } : {}),
     ...(options?.secondaryStorage ? { secondaryStorage: options.secondaryStorage } : {}),
@@ -57,10 +65,12 @@ const createAuth = (db: Surreal, options?: SetupAuthContextOptions) =>
   });
 
 type Auth = ReturnType<typeof createAuth>;
+type AuthRuntimeContext = Awaited<Auth["$context"]>;
 export type AuthContext = {
   db: Surreal;
   auth: Auth;
   adapter: DBAdapter;
+  test: AuthRuntimeContext["test"];
   namespace: string;
   database: string;
   reset: () => Promise<void>;
@@ -73,6 +83,7 @@ export async function setupAuthContext(options?: SetupAuthContextOptions): Promi
   const auth = createAuth(db, options);
 
   const authOptions = auth.options as BetterAuthOptions;
+  const runtimeContext = await auth.$context;
   const adapterFactory = authOptions.database as DBAdapterInstance;
   const adapter = adapterFactory(authOptions) as DBAdapter;
 
@@ -87,10 +98,12 @@ export async function setupAuthContext(options?: SetupAuthContextOptions): Promi
     db,
     auth,
     adapter,
+    test: runtimeContext.test,
     namespace,
     database,
     reset: async () => {
       await truncateAuthTables(db);
+      runtimeContext.test.clearOTPs?.();
     },
     closeDb,
   };

@@ -25,14 +25,16 @@ type EmailOtpApi = {
 
 const asEmailOtpApi = (value: unknown): EmailOtpApi => value as EmailOtpApi;
 
-const otpKey = (
-  email: string,
-  type: "sign-in" | "email-verification" | "forget-password" | "change-email",
-) => `${type}:${email.toLowerCase()}`;
+const requireGetOTP = (context: AuthContext) => {
+  const getOTP = context.test.getOTP;
+  if (!getOTP) {
+    throw new Error("Better Auth testUtils captureOTP helper is unavailable.");
+  }
+  return getOTP;
+};
 
 describe("Plugin - Email OTP", () => {
   let context: AuthContext | undefined;
-  const otpByKey = new Map<string, string>();
 
   const requireContext = (): AuthContext => {
     if (!context) {
@@ -45,16 +47,13 @@ describe("Plugin - Email OTP", () => {
     context = await setupAuthContext({
       plugins: [
         emailOTP({
-          sendVerificationOTP: async ({ email, otp, type }) => {
-            otpByKey.set(otpKey(email, type), otp);
-          },
+          sendVerificationOTP: async () => {},
         }),
       ],
     });
   });
 
   beforeEach(async () => {
-    otpByKey.clear();
     await requireContext().reset();
   });
 
@@ -67,6 +66,7 @@ describe("Plugin - Email OTP", () => {
   it("signs in an existing user with a valid sign-in OTP", async () => {
     const context = requireContext();
     const api = asEmailOtpApi(context.auth.api);
+    const getOTP = requireGetOTP(context);
     const email = "otp-existing@example.com";
     const password = "Password1234!";
 
@@ -85,7 +85,7 @@ describe("Plugin - Email OTP", () => {
       },
     });
 
-    const otp = otpByKey.get(otpKey(email, "sign-in"));
+    const otp = getOTP(email);
     expect(otp).toBeDefined();
 
     const signIn = await api.signInEmailOTP({
@@ -108,6 +108,7 @@ describe("Plugin - Email OTP", () => {
   it("creates a new user when signing in with OTP for an unregistered email", async () => {
     const context = requireContext();
     const api = asEmailOtpApi(context.auth.api);
+    const getOTP = requireGetOTP(context);
     const email = "otp-new-user@example.com";
 
     await api.sendVerificationOTP({
@@ -117,7 +118,7 @@ describe("Plugin - Email OTP", () => {
       },
     });
 
-    const otp = otpByKey.get(otpKey(email, "sign-in"));
+    const otp = getOTP(email);
     expect(otp).toBeDefined();
 
     const signIn = await api.signInEmailOTP({

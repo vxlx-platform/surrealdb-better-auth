@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { setCookieToHeader } from "better-auth/cookies";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";
@@ -47,15 +46,9 @@ describe("Auth Flow - Email/Password", () => {
     return server;
   };
 
-  const createSessionHeaders = async (email: string, password: string) => {
+  const createSessionHeaders = async (userId: string) => {
     const context = requireContext();
-    const signInResponse = await context.auth.api.signInEmail({
-      body: { email, password },
-      asResponse: true,
-    });
-    const headers = new Headers();
-    setCookieToHeader(headers)({ response: signInResponse });
-    return headers;
+    return await context.test.getAuthHeaders({ userId });
   };
 
   beforeAll(async () => {
@@ -179,7 +172,7 @@ describe("Auth Flow - Email/Password", () => {
       },
     });
 
-    const userHeaders = await createSessionHeaders(email, currentPassword);
+    const userHeaders = await createSessionHeaders(signUp.user.id);
     const changed = await changePassword({
       headers: userHeaders,
       body: {

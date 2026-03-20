@@ -4,6 +4,7 @@ import { username } from "better-auth/plugins";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";
+import { startTestServer } from "../../__helpers__/server";
 import { withSuppressedConsoleError } from "../../__helpers__/suppress-console-error";
 
 type UsernameFields = {
@@ -24,6 +25,7 @@ type UsernameApi = {
       password: string;
       name: string;
       username: string;
+      displayUsername?: string | undefined;
       image?: string | undefined;
       callbackURL?: string | undefined;
       rememberMe?: boolean | undefined;
@@ -208,5 +210,211 @@ describe("Live DB - Username Plugin", () => {
         body: { username: "invalid username" },
       }),
     ).rejects.toThrow();
+  });
+
+  it("respects custom username length options", async () => {
+    const customContext = await setupAuthContext({
+      plugins: [
+        username({
+          minUsernameLength: 5,
+          maxUsernameLength: 8,
+        }),
+      ],
+    });
+
+    try {
+      await customContext.reset();
+      const api = asUsernameApi(customContext.auth.api);
+
+      await expect(
+        api.isUsernameAvailable({
+          body: { username: "abcd" },
+        }),
+      ).rejects.toThrow();
+
+      await expect(
+        api.signUpEmail({
+          body: {
+            email: "length-too-long@example.com",
+            password: "length-pass",
+            name: "Length Too Long",
+            username: "waytoolong",
+          },
+        }),
+      ).rejects.toThrow();
+
+      const valid = await api.signUpEmail({
+        body: {
+          email: "length-valid@example.com",
+          password: "length-pass",
+          name: "Length Valid",
+          username: "lengthok",
+        },
+      });
+      expect(withUsernameFields(valid.user).username).toBe("lengthok");
+    } finally {
+      await customContext.closeDb();
+    }
+  });
+
+  it("applies custom username and display username normalization options", async () => {
+    const customContext = await setupAuthContext({
+      plugins: [
+        username({
+          usernameNormalization: (value) =>
+            value.toLowerCase().replaceAll("0", "o").replaceAll("3", "e"),
+          displayUsernameNormalization: (value) => value.toLowerCase(),
+        }),
+      ],
+    });
+
+    try {
+      await customContext.reset();
+      const api = asUsernameApi(customContext.auth.api);
+
+      const signUp = await api.signUpEmail({
+        body: {
+          email: "custom-normalization@example.com",
+          password: "custom-normalization-password",
+          name: "Normalization User",
+          username: "C00L.Us3r",
+          displayUsername: "Display_NAME",
+        },
+      });
+      const user = withUsernameFields(signUp.user);
+
+      expect(user.username).toBe("cool.user");
+      expect(user.displayUsername).toBe("display_name");
+
+      const dbUser = await customContext.adapter.findOne<UserRow>({
+        model: "user",
+        where: [{ field: "id", operator: "eq", value: signUp.user.id }],
+      });
+      expect(dbUser?.username).toBe("cool.user");
+      expect(dbUser?.displayUsername).toBe("display_name");
+
+      const signIn = await api.signInUsername({
+        body: {
+          username: "Cool.UsEr",
+          password: "custom-normalization-password",
+        },
+      });
+      expect(signIn.user.id).toBe(signUp.user.id);
+    } finally {
+      await customContext.closeDb();
+    }
+  });
+
+  it("respects custom username and display username validators", async () => {
+    const customContext = await setupAuthContext({
+      plugins: [
+        username({
+          usernameValidator: (value) => value !== "admin",
+          displayUsernameValidator: (value) => /^[a-zA-Z0-9_-]+$/.test(value),
+        }),
+      ],
+    });
+
+    try {
+      await customContext.reset();
+      const api = asUsernameApi(customContext.auth.api);
+
+      await expect(
+        api.signUpEmail({
+          body: {
+            email: "reserved-username@example.com",
+            password: "reserved-pass",
+            name: "Reserved User",
+            username: "admin",
+          },
+        }),
+      ).rejects.toThrow();
+
+      await expect(
+        api.signUpEmail({
+          body: {
+            email: "invalid-display@example.com",
+            password: "display-pass",
+            name: "Display User",
+            username: "valid_user",
+            displayUsername: "Invalid Display!",
+          },
+        }),
+      ).rejects.toThrow();
+
+      const valid = await api.signUpEmail({
+        body: {
+          email: "valid-custom-validator@example.com",
+          password: "validator-pass",
+          name: "Valid Validator",
+          username: "member_user",
+          displayUsername: "Valid_Name",
+        },
+      });
+      expect(withUsernameFields(valid.user).username).toBe("member_user");
+      expect(withUsernameFields(valid.user).displayUsername).toBe("Valid_Name");
+    } finally {
+      await customContext.closeDb();
+    }
+  });
+
+  it("supports post-normalization username validation", async () => {
+    const customContext = await setupAuthContext({
+      plugins: [
+        username({
+          usernameNormalization: (value) => value.toLowerCase(),
+          usernameValidator: (value) => /^[a-z]+$/.test(value),
+          validationOrder: {
+            username: "post-normalization",
+          },
+        }),
+      ],
+    });
+
+    try {
+      await customContext.reset();
+      const api = asUsernameApi(customContext.auth.api);
+
+      const signUp = await api.signUpEmail({
+        body: {
+          email: "post-normalization@example.com",
+          password: "post-normalization-password",
+          name: "Post Normalization",
+          username: "CaseUser",
+        },
+      });
+
+      const user = withUsernameFields(signUp.user);
+      expect(user.username).toBe("caseuser");
+      expect(user.displayUsername).toBe("CaseUser");
+    } finally {
+      await customContext.closeDb();
+    }
+  });
+
+  it("supports disabling the username availability endpoint", async () => {
+    const customContext = await setupAuthContext({
+      disabledPaths: ["/is-username-available"],
+      plugins: [username()],
+    });
+    const server = await startTestServer(customContext.auth);
+
+    try {
+      await customContext.reset();
+
+      const response = await fetch(server.url("/api/auth/is-username-available"), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ username: "hidden_user" }),
+        signal: AbortSignal.timeout(5_000),
+      });
+
+      expect(response.status).toBe(404);
+    } finally {
+      await server.stop();
+      await customContext.closeDb();
+    }
   });
 });
