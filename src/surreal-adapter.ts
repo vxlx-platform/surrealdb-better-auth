@@ -340,10 +340,11 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           : resolveSchemaType(table.modelName, dbFieldName, field.type);
         const requiredType = field.required ? fieldType : `option<${fieldType}>`;
         const fieldDefinition = `DEFINE FIELD OVERWRITE ${resolvedField} ON TABLE ${tableName} TYPE ${requiredType};`;
-        if (!field.unique) return [fieldDefinition];
+        if (!field.unique && !field.index) return [fieldDefinition];
 
         const indexName = buildIndexName(tableName, resolvedField);
-        const indexDefinition = `DEFINE INDEX OVERWRITE ${escapeIdent(indexName)} ON TABLE ${tableName} COLUMNS ${resolvedField} UNIQUE;`;
+        const uniquenessClause = field.unique ? " UNIQUE" : "";
+        const indexDefinition = `DEFINE INDEX OVERWRITE ${escapeIdent(indexName)} ON TABLE ${tableName} COLUMNS ${resolvedField}${uniquenessClause};`;
         return [fieldDefinition, indexDefinition];
       });
 

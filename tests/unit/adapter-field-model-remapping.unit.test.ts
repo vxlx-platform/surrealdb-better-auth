@@ -94,17 +94,29 @@ describe("Adapter Core - Field/Model Remapping (Mocked Schema)", () => {
     expect(schema?.code).toContain(
       "DEFINE FIELD OVERWRITE email_address ON TABLE app_user TYPE string;",
     );
+    expect(schema?.code).toContain(
+      "DEFINE INDEX OVERWRITE app_userEmail_address_idx ON TABLE app_user COLUMNS email_address UNIQUE;",
+    );
     expect(schema?.code).toContain("DEFINE TABLE OVERWRITE app_session SCHEMAFULL;");
     expect(schema?.code).toContain(
       "DEFINE FIELD OVERWRITE owner_id ON TABLE app_session TYPE record<app_user>;",
+    );
+    expect(schema?.code).toContain(
+      "DEFINE INDEX OVERWRITE app_sessionOwner_id_idx ON TABLE app_session COLUMNS owner_id;",
     );
     expect(schema?.code).toContain("DEFINE TABLE OVERWRITE app_account SCHEMAFULL;");
     expect(schema?.code).toContain(
       "DEFINE FIELD OVERWRITE provider_account_id ON TABLE app_account TYPE string;",
     );
+    expect(schema?.code).toContain(
+      "DEFINE INDEX OVERWRITE app_accountOwner_id_idx ON TABLE app_account COLUMNS owner_id;",
+    );
     expect(schema?.code).toContain("DEFINE TABLE OVERWRITE app_verification SCHEMAFULL;");
     expect(schema?.code).toContain(
       "DEFINE FIELD OVERWRITE verification_identifier ON TABLE app_verification TYPE string;",
+    );
+    expect(schema?.code).toContain(
+      "DEFINE INDEX OVERWRITE app_verificationVerification_identifier_idx ON TABLE app_verification COLUMNS verification_identifier;",
     );
   });
 
