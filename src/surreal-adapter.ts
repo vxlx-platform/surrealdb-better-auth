@@ -683,6 +683,8 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       supportsDates: true,
       supportsBooleans: true,
       disableIdGeneration: true,
+      supportsNumericIds: false,
+      supportsUUIDs: false,
       customTransformInput: ({ data, field, fieldAttributes, model, schema, action }) => {
         if (data === undefined || data === null) return data;
 
