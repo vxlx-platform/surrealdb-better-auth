@@ -1,6 +1,6 @@
 {
   "name": "@vxlx/surrealdb-better-auth",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "SurrealDB adapter for Better Auth",
   "license": "MIT",
   "keywords": [

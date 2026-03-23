@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-03-23
+
+### Changed
+
+- Refactored adapter internals for stricter and more modern behavior, including fail-fast query result normalization, direct field-name resolution, a pure `SET` clause builder, tighter create/update payload typing, and immutable transaction factory setup.
+- Expanded integration coverage across Better Auth plugins and features, including JWT algorithm variants, session cookie cache strategies, last-login-method, anonymous, one-time-token, and extended username option coverage.
+- Refactored integration test setup to use Better Auth `testUtils()` helpers more consistently for auth/session flows and OTP capture.
+
 ## [0.9.0] - 2026-03-19
 
 ### ⚠ Breaking
