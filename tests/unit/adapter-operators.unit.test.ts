@@ -216,6 +216,19 @@ describe("Adapter Core - CRUD Where Operators", () => {
     expect(sql).toContain("string::ends_with");
   });
 
+  it("fails fast on impossible mixed Surreal query result shapes", async () => {
+    const client = createClient();
+    client.query.mockResolvedValueOnce([[createdUser], createdUser]);
+    const adapter = createAdapter(client);
+
+    await expect(
+      adapter.findMany({
+        model: "user",
+        limit: 10,
+      }),
+    ).rejects.toThrow("Unexpected Surreal query result shape");
+  });
+
   it('rejects non-array values for "in" and "not_in"', async () => {
     const client = createClient();
     const adapter = createAdapter(client);

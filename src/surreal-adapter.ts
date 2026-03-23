@@ -57,6 +57,7 @@ type SchemaField = Pick<
   "type" | "required" | "unique" | "references" | "fieldName"
 >;
 
+type PlainObject = Record<string, unknown>;
 type QueryRows<T> = T[] | [T[]];
 type TransactionRunner = Exclude<
   NonNullable<AdapterFactoryOptions["config"]["transaction"]>,
@@ -89,28 +90,39 @@ const isSupportedSchemaFieldType = (
 ): fieldType is SupportedSchemaFieldType =>
   typeof fieldType === "string" && fieldType in FIELD_TYPE_MAP;
 
+const unexpectedQueryRowsError = () =>
+  new Error(
+    "[surrealdb-adapter] Unexpected Surreal query result shape. Expected rows or a single wrapped row set.",
+  );
+
 const toResultRows = <T>(result: QueryRows<T>): T[] => {
   if (result.length === 0) return [];
-  if (result.length === 1 && Array.isArray(result[0])) {
-    return result[0];
+
+  const [first, ...rest] = result;
+  if (Array.isArray(first)) {
+    if (rest.length === 0) {
+      return first;
+    }
+    throw unexpectedQueryRowsError();
   }
-  return result.filter((value): value is T => !Array.isArray(value));
+
+  for (const row of rest) {
+    if (Array.isArray(row)) {
+      throw unexpectedQueryRowsError();
+    }
+  }
+
+  return result as T[];
 };
 
 const toTableIdent = (table: string) => new Table(table).toString();
 const toEscapedFieldIdent = (field: string) => escapeIdent(field);
+const isPlainObject = (value: unknown): value is PlainObject =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConfig = {}) => {
-  let lazyOptions: BetterAuthOptions | undefined;
-  let adapterFactoryOptions: AdapterFactoryOptions | undefined;
-
   const adapterError = (message: string, cause?: unknown) =>
     new Error(`[surrealdb-adapter] ${message}`, cause === undefined ? undefined : { cause });
-
-  const requireOptions = <T>(value: T | undefined, name: string): T => {
-    if (!value) throw adapterError(`${name} was not initialized before transaction execution.`);
-    return value;
-  };
 
   const toStringRecordId = (value: unknown, expectedTable?: string): StringRecordId => {
     const asString =
@@ -258,28 +270,28 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
   };
 
   const buildUpdateSetStatement = (
-    update: Record<string, unknown>,
-  ): { setClause: string; bindings: Record<string, unknown> } => {
-    const assignments: string[] = [];
-    const bindings: Record<string, unknown> = {};
-    let index = 0;
+    update: PlainObject,
+  ): { setClause: string; bindings: PlainObject } => {
+    const definedEntries = Object.entries(update).filter(([, value]) => value !== undefined);
 
-    for (const [field, value] of Object.entries(update)) {
-      if (value === undefined) continue;
+    const fragments = definedEntries.map(([field, value], index) => {
       if (value === null) {
-        // SurrealDB uses NONE to unset a field; null would keep a persisted null.
-        assignments.push(`${toEscapedFieldIdent(field)} = NONE`);
-        continue;
+        return {
+          assignment: `${toEscapedFieldIdent(field)} = NONE`,
+          binding: null,
+        } as const;
       }
 
-      const key = `update_${index++}`;
-      assignments.push(`${toEscapedFieldIdent(field)} = $${key}`);
-      bindings[key] = value;
-    }
+      const key = `update_${index}`;
+      return {
+        assignment: `${toEscapedFieldIdent(field)} = $${key}`,
+        binding: [key, value] as const,
+      } as const;
+    });
 
     return {
-      setClause: assignments.join(", "),
-      bindings,
+      setClause: fragments.map(({ assignment }) => assignment).join(", "),
+      bindings: Object.fromEntries(fragments.flatMap(({ binding }) => (binding ? [binding] : []))),
     };
   };
 
@@ -417,13 +429,6 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       getModelName,
     }: Parameters<NonNullable<AdapterFactoryOptions["adapter"]>>[0]) => {
       const resolveTableName = getModelName;
-      const resolveFieldName = (model: string, field: string) => {
-        try {
-          return getFieldName({ model, field });
-        } catch {
-          return field;
-        }
-      };
 
       const execQuery = async <T>(query: BoundQuery) =>
         toResultRows<T>(await db.query<QueryRows<T>>(query.query, query.bindings));
@@ -438,7 +443,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
 
       const buildSelectColumns = (model: string, select?: string[]) =>
         select && select.length > 0
-          ? select.map((field) => toEscapedFieldIdent(resolveFieldName(model, field))).join(", ")
+          ? select.map((field) => toEscapedFieldIdent(getFieldName({ model, field }))).join(", ")
           : "*";
 
       const countRecords = async (model: string, where?: CleanedWhere[]) => {
@@ -453,7 +458,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       };
 
       const customAdapter: CustomAdapter = {
-        async create<T extends Record<string, unknown>>({
+        async create<T extends PlainObject>({
           model,
           data,
         }: {
@@ -517,7 +522,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           appendWhereClause(query, whereClause);
 
           if (sortBy) {
-            const sortField = toEscapedFieldIdent(resolveFieldName(model, sortBy.field));
+            const sortField = toEscapedFieldIdent(getFieldName({ model, field: sortBy.field }));
             const direction = sortBy.direction === "desc" ? "DESC" : "ASC";
             query.append(new BoundQuery(` ORDER BY ${sortField} ${direction}`));
           }
@@ -553,13 +558,11 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           where: CleanedWhere[];
           update: T;
         }): Promise<T | null> {
-          if (typeof update !== "object" || update === null || Array.isArray(update)) {
+          if (!isPlainObject(update)) {
             throw adapterError(`Expected update payload for "${model}" to be a plain object.`);
           }
 
-          const { setClause, bindings } = buildUpdateSetStatement(
-            update as Record<string, unknown>,
-          );
+          const { setClause, bindings } = buildUpdateSetStatement(update);
 
           const tableName = toTableIdent(resolveTableName(model));
           const whereClause = buildWhereClause(where);
@@ -644,91 +647,90 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       return customAdapter;
     };
 
-  const createTransactionRunner = (): TransactionRunner => async (callback) => {
-    const tx: SurrealTransactionClient = await client.beginTransaction();
-    const currentFactoryOptions = requireOptions(adapterFactoryOptions, "Adapter factory options");
-    const options = requireOptions(lazyOptions, "Adapter options");
-    const txAdapter = createAdapterFactory({
-      config: {
-        ...currentFactoryOptions.config,
-        transaction: false,
-      },
-      adapter: createCustomAdapter(tx),
-    })(options);
-
-    try {
-      const result = await callback(txAdapter);
-      await tx.commit();
-      return result;
-    } catch (error) {
-      try {
-        await tx.cancel();
-      } catch {
-        // Ignore cancellation failures and preserve the original failure.
-      }
-      throw error;
-    }
-  };
-
   const enableTransactions = supportsTransactions();
+  const baseAdapterConfig = {
+    adapterId: "surrealdb",
+    adapterName: "SurrealDB Adapter",
+    usePlural: false,
+    debugLogs: config.debugLogs ?? false,
+    supportsJSON: true,
+    supportsArrays: true,
+    supportsDates: true,
+    supportsBooleans: true,
+    disableIdGeneration: true,
+    supportsNumericIds: false,
+    supportsUUIDs: false,
+    customTransformInput: ({ data, field, fieldAttributes, model, schema, action }) => {
+      if (data === undefined || data === null) return data;
 
-  adapterFactoryOptions = {
-    config: {
-      adapterId: "surrealdb",
-      adapterName: "SurrealDB Adapter",
-      usePlural: false,
-      debugLogs: config.debugLogs ?? false,
-      supportsJSON: true,
-      supportsArrays: true,
-      supportsDates: true,
-      supportsBooleans: true,
-      disableIdGeneration: true,
-      supportsNumericIds: false,
-      supportsUUIDs: false,
-      customTransformInput: ({ data, field, fieldAttributes, model, schema, action }) => {
-        if (data === undefined || data === null) return data;
+      const tables = schema as BetterAuthDBSchema;
+      const currentTable = tables[model]?.modelName ?? model;
 
-        const tables = schema as BetterAuthDBSchema;
-        const currentTable = tables[model]?.modelName ?? model;
+      if (fieldAttributes.type === "date" && data instanceof Date) {
+        return new DateTime(data);
+      }
 
-        if (fieldAttributes.type === "date" && data instanceof Date) {
-          return new DateTime(data);
-        }
+      if (field === "id") {
+        // Keep SurrealDB as source of truth for record-id generation on create.
+        if (action === "create") return undefined;
+        return toRecordIdInput(data, currentTable);
+      }
 
-        if (field === "id") {
-          // Keep SurrealDB as source of truth for record-id generation on create.
-          if (action === "create") return undefined;
-          return toRecordIdInput(data, currentTable);
-        }
+      if (fieldAttributes.references?.field === "id") {
+        const targetTable = tables[fieldAttributes.references.model]?.modelName;
+        if (!targetTable) return data;
+        return toRecordIdInput(data, targetTable);
+      }
 
-        if (fieldAttributes.references?.field === "id") {
-          const targetTable = tables[fieldAttributes.references.model]?.modelName;
-          if (!targetTable) return data;
-          return toRecordIdInput(data, targetTable);
-        }
-
-        return data;
-      },
-      customTransformOutput: ({ data, field, fieldAttributes }) => {
-        if (data === undefined || data === null) return data;
-
-        if (fieldAttributes.type === "date") {
-          return normalizeDateValue(data);
-        }
-
-        const isIdLikeField = field === "id" || fieldAttributes.references?.field === "id";
-        if (!isIdLikeField) return data;
-
-        return normalizeRecordIdValue(data);
-      },
-      transaction: enableTransactions ? createTransactionRunner() : false,
+      return data;
     },
-    adapter: createCustomAdapter(client),
-  };
+    customTransformOutput: ({ data, field, fieldAttributes }) => {
+      if (data === undefined || data === null) return data;
 
-  const adapter = createAdapterFactory(adapterFactoryOptions);
-  return (options: BetterAuthOptions): DBAdapter<BetterAuthOptions> => {
-    lazyOptions = options;
-    return adapter(options);
-  };
+      if (fieldAttributes.type === "date") {
+        return normalizeDateValue(data);
+      }
+
+      const isIdLikeField = field === "id" || fieldAttributes.references?.field === "id";
+      if (!isIdLikeField) return data;
+
+      return normalizeRecordIdValue(data);
+    },
+  } satisfies Omit<AdapterFactoryOptions["config"], "transaction">;
+
+  const createFactoryOptions = (
+    db: SurrealQueryClient,
+    transaction: AdapterFactoryOptions["config"]["transaction"],
+  ): AdapterFactoryOptions => ({
+    config: {
+      ...baseAdapterConfig,
+      transaction,
+    },
+    adapter: createCustomAdapter(db),
+  });
+
+  const createTransactionRunner =
+    (options: BetterAuthOptions): TransactionRunner =>
+    async (callback) => {
+      const tx: SurrealTransactionClient = await client.beginTransaction();
+      const txAdapter = createAdapterFactory(createFactoryOptions(tx, false))(options);
+
+      try {
+        const result = await callback(txAdapter);
+        await tx.commit();
+        return result;
+      } catch (error) {
+        try {
+          await tx.cancel();
+        } catch {
+          // Ignore cancellation failures and preserve the original failure.
+        }
+        throw error;
+      }
+    };
+
+  return (options: BetterAuthOptions): DBAdapter<BetterAuthOptions> =>
+    createAdapterFactory(
+      createFactoryOptions(client, enableTransactions ? createTransactionRunner(options) : false),
+    )(options);
 };
