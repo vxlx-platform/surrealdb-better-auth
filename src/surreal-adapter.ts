@@ -661,7 +661,14 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     supportsNumericIds: false,
     supportsUUIDs: false,
     customTransformInput: ({ data, field, fieldAttributes, model, schema, action }) => {
-      if (data === undefined || data === null) return data;
+      if (data === undefined) return data;
+      if (data === null) {
+        // Better Auth uses nullable optionals (for example user.image in test-utils),
+        // while Surreal schema fields are expressed as `none | type`. Omitting the
+        // field on create maps that nullish input to Surreal's NONE semantics.
+        if (action === "create") return undefined;
+        return data;
+      }
 
       const tables = schema as BetterAuthDBSchema;
       const currentTable = tables[model]?.modelName ?? model;

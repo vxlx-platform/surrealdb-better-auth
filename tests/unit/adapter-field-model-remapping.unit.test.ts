@@ -144,4 +144,34 @@ describe("Adapter Core - Field/Model Remapping (Mocked Schema)", () => {
     expect(bindings.limit).toBe(10);
     expect(bindings.offset).toBe(2);
   });
+
+  it("omits nullable create fields when Better Auth passes null", async () => {
+    const { adapter, client } = buildAdapter();
+    client.query.mockResolvedValueOnce([
+      [
+        {
+          id: "app_user:test-user",
+          display_name: "Null Image User",
+          email_address: "null-image@example.com",
+          email_verified: true,
+        },
+      ],
+    ]);
+
+    await adapter.create({
+      model: "user",
+      data: {
+        email: "null-image@example.com",
+        name: "Null Image User",
+        image: null,
+      },
+    });
+
+    const [, bindings] = client.query.mock.calls.at(-1) as [string, Record<string, unknown>];
+    expect(bindings.data).toMatchObject({
+      display_name: "Null Image User",
+      email_address: "null-image@example.com",
+    });
+    expect(bindings.data).not.toHaveProperty("avatar_url");
+  });
 });
