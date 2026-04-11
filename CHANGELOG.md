@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-04-11
+
+### Changed
+
+- Hardened live integration test setup to fail fast when SurrealDB connect, signin, or namespace/database selection cannot complete, with a clearer default test endpoint and configurable connection timeout.
+- Aligned adapter create-time null handling with SurrealDB `NONE` semantics by omitting nullable optional fields on create instead of sending persisted `NULL` values for Better Auth optional inputs.
+- Added and stabilized passkey plugin integration coverage, including authenticated passkey listing, owner-only update/delete flows, and helper usage that preserves persisted Surreal record ids.
+
 ## [0.9.1] - 2026-03-23
 
 ### Changed
