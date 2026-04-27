@@ -161,7 +161,7 @@ describe("Live DB - JWT JWKS Surreal Access", () => {
 
   beforeAll(async () => {
     accessName = `user_access`;
-    jwksPath = `/.well-known/jwks.json`;
+    jwksPath = `/.well-known.json`;
 
     const connection = await createTestDbConnection();
     db = connection.db;
@@ -292,6 +292,7 @@ describe("Live DB - JWT JWKS Surreal Access", () => {
         "RETURN { authRef: $auth, authRaw: $auth, tokenRaw: $token, authKey: record::id($auth), authTable: record::tb($auth), access: $access };",
       );
       const result = firstRows(raw)[0];
+      console.log("-------------------------", JSON.stringify(result, null, 2));
       expect(result).toBeDefined();
       expect(String(result?.authRef)).toBe(issued.signUp.user.id);
       expect(result?.authKey).toBe(issued.signUp.user.id.split(":")[1]);
@@ -301,5 +302,4 @@ describe("Live DB - JWT JWKS Surreal Access", () => {
       await surrealClient.close().catch(() => {});
     }
   });
-
 });
