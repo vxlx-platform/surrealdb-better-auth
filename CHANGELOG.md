@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-04-28
+
+### Changed
+
+- Moved adapter id/reference persistence further toward SurrealDB-native behavior by normalizing Better Auth id-bearing writes to SDK `RecordId` values internally while preserving canonical `table:id` strings at the adapter boundary.
+- Updated generated schema for Better Auth relationships to emit SurrealDB `REFERENCE` fields with `ON DELETE` behavior derived from Better Auth reference metadata, plus adapter-level default and per-field override support.
+- Updated generated schema to honor Better Auth `bigint: true` numeric field metadata by emitting SurrealDB `int` field types where appropriate.
+- Added opt-in `schemaAssertions` support for explicit schema-only `ASSERT` generation covering simple email, string length, regex, and numeric range rules.
+- Hardened schema generation and adapter docs around record references, `defineAccess`, and schema-level delete behavior precedence.
+- Expanded unit and integration coverage for record-id strictness, remapped reference fields, passkey schema generation, and transaction capability fallback behavior.
+- Simplified internal adapter helpers and query composition by removing low-value indirection, tightening defensive checks to the places that still provide user-facing value, and clarifying no-op update / single-record delete semantics.
+
 ## [0.9.2] - 2026-04-11
 
 ### Changed
