@@ -39,11 +39,48 @@ type RecordIdFormat = "native" | "uuidv7" | "ulid";
 
 type RecordIdFormatResolver = RecordIdFormat | ((input: { model: string }) => RecordIdFormat);
 
+type SurrealReferenceDeleteBehavior = "ignore" | "unset" | "reject" | "cascade";
+
+type BetterAuthReferenceDeleteBehavior = NonNullable<
+  NonNullable<DBFieldAttribute["references"]>["onDelete"]
+>;
+
+type SurrealReferenceDeleteBehaviorConfig = {
+  default?: SurrealReferenceDeleteBehavior;
+  overrides?: Record<string, SurrealReferenceDeleteBehavior>;
+};
+
+type SurrealSchemaAssertionRule = {
+  email?: boolean;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  min?: number;
+  max?: number;
+};
+
+type SurrealSchemaAssertionsConfig = {
+  fields: Record<string, SurrealSchemaAssertionRule>;
+  onUnsupported?: "ignore" | "error";
+};
+
+type ValidatedReferenceDeleteBehaviorConfig = {
+  default?: SurrealReferenceDeleteBehavior;
+  overrides: Record<string, SurrealReferenceDeleteBehavior>;
+};
+
+type ValidatedSchemaAssertionsConfig = {
+  fields: Record<string, SurrealSchemaAssertionRule>;
+  onUnsupported: "ignore" | "error";
+};
+
 export interface SurrealAdapterConfig {
   debugLogs?: DBAdapterDebugLogOption;
   transaction?: boolean;
   recordIdFormat?: RecordIdFormatResolver;
   defineAccess?: () => BoundQuery<unknown[]>;
+  referenceDeleteBehavior?: SurrealReferenceDeleteBehaviorConfig;
+  schemaAssertions?: SurrealSchemaAssertionsConfig;
 }
 
 const SUPPORTED_RECORD_ID_FORMATS = [
@@ -52,9 +89,28 @@ const SUPPORTED_RECORD_ID_FORMATS = [
   "ulid",
 ] as const satisfies readonly RecordIdFormat[];
 
+const SURREAL_REFERENCE_DELETE_BEHAVIOR_MAP = {
+  ignore: "IGNORE",
+  unset: "UNSET",
+  reject: "REJECT",
+  cascade: "CASCADE",
+} as const satisfies Record<
+  SurrealReferenceDeleteBehavior,
+  "IGNORE" | "UNSET" | "REJECT" | "CASCADE"
+>;
+
+const BETTER_AUTH_REFERENCE_DELETE_BEHAVIOR_MAP = {
+  "no action": "ignore",
+  restrict: "reject",
+  cascade: "cascade",
+  "set null": "unset",
+} as const satisfies Partial<
+  Record<BetterAuthReferenceDeleteBehavior, SurrealReferenceDeleteBehavior>
+>;
+
 type SchemaField = Pick<
   DBFieldAttribute,
-  "type" | "required" | "unique" | "references" | "fieldName"
+  "type" | "required" | "unique" | "references" | "fieldName" | "bigint"
 >;
 
 type PlainObject = Record<string, unknown>;
@@ -67,6 +123,7 @@ type TransactionRunner = Exclude<
 type SurrealSchemaFieldType =
   | "string"
   | "number"
+  | "int"
   | "bool"
   | "datetime"
   | "object"
@@ -98,18 +155,12 @@ const unexpectedQueryRowsError = () =>
 const toResultRows = <T>(result: QueryRows<T>): T[] => {
   if (result.length === 0) return [];
 
-  const [first, ...rest] = result;
+  const [first] = result;
   if (Array.isArray(first)) {
-    if (rest.length === 0) {
+    if (result.length === 1) {
       return first;
     }
     throw unexpectedQueryRowsError();
-  }
-
-  for (const row of rest) {
-    if (Array.isArray(row)) {
-      throw unexpectedQueryRowsError();
-    }
   }
 
   return result as T[];
@@ -120,53 +171,308 @@ const toEscapedFieldIdent = (field: string) => escapeIdent(field);
 const isPlainObject = (value: unknown): value is PlainObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const isSupportedReferenceDeleteBehavior = (
+  value: unknown,
+): value is SurrealReferenceDeleteBehavior =>
+  typeof value === "string" && value in SURREAL_REFERENCE_DELETE_BEHAVIOR_MAP;
+
+const validateReferenceDeleteBehaviorConfig = (
+  configured: SurrealReferenceDeleteBehaviorConfig | undefined,
+  onError: (message: string) => never,
+): ValidatedReferenceDeleteBehaviorConfig | null => {
+  if (!configured) return null;
+
+  const defaultBehavior = configured.default;
+  if (defaultBehavior !== undefined && !isSupportedReferenceDeleteBehavior(defaultBehavior)) {
+    onError(`Unsupported referenceDeleteBehavior default "${String(defaultBehavior)}".`);
+  }
+
+  const overrides = Object.fromEntries(
+    Object.entries(configured.overrides ?? {}).map(([key, value]) => {
+      if (!isSupportedReferenceDeleteBehavior(value)) {
+        onError(`Unsupported referenceDeleteBehavior override "${String(value)}" for "${key}".`);
+      }
+
+      return [key, value];
+    }),
+  ) as Record<string, SurrealReferenceDeleteBehavior>;
+
+  return {
+    default: defaultBehavior,
+    overrides,
+  };
+};
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+const isNonNegativeInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value >= 0;
+
+const validateSchemaAssertionRule = (
+  key: string,
+  rule: unknown,
+  onError: (message: string) => never,
+): SurrealSchemaAssertionRule => {
+  if (!isPlainObject(rule)) {
+    onError(`schemaAssertions rule for "${key}" must be an object.`);
+  }
+
+  if (rule.email !== undefined && typeof rule.email !== "boolean") {
+    onError(`schemaAssertions email for "${key}" must be a boolean.`);
+  }
+
+  if (rule.minLength !== undefined && !isNonNegativeInteger(rule.minLength)) {
+    onError(`schemaAssertions minLength for "${key}" must be a non-negative integer.`);
+  }
+
+  if (rule.maxLength !== undefined && !isNonNegativeInteger(rule.maxLength)) {
+    onError(`schemaAssertions maxLength for "${key}" must be a non-negative integer.`);
+  }
+
+  if (rule.pattern !== undefined && typeof rule.pattern !== "string") {
+    onError(`schemaAssertions pattern for "${key}" must be a string.`);
+  }
+
+  if (rule.min !== undefined && !isFiniteNumber(rule.min)) {
+    onError(`schemaAssertions min for "${key}" must be a finite number.`);
+  }
+
+  if (rule.max !== undefined && !isFiniteNumber(rule.max)) {
+    onError(`schemaAssertions max for "${key}" must be a finite number.`);
+  }
+
+  if (
+    rule.minLength !== undefined &&
+    rule.maxLength !== undefined &&
+    rule.minLength > rule.maxLength
+  ) {
+    onError(`schemaAssertions minLength for "${key}" cannot exceed maxLength.`);
+  }
+
+  if (rule.min !== undefined && rule.max !== undefined && rule.min > rule.max) {
+    onError(`schemaAssertions min for "${key}" cannot exceed max.`);
+  }
+
+  return rule;
+};
+
+const validateSchemaAssertionsConfig = (
+  configured: SurrealSchemaAssertionsConfig | undefined,
+  onError: (message: string) => never,
+): ValidatedSchemaAssertionsConfig | null => {
+  if (!configured) return null;
+
+  const onUnsupported = configured.onUnsupported ?? "ignore";
+  if (onUnsupported !== "ignore" && onUnsupported !== "error") {
+    onError(`Unsupported schemaAssertions onUnsupported value "${String(onUnsupported)}".`);
+  }
+
+  const fields = Object.fromEntries(
+    Object.entries(configured.fields ?? {}).map(([key, rule]) => [
+      key,
+      validateSchemaAssertionRule(key, rule, onError),
+    ]),
+  ) as Record<string, SurrealSchemaAssertionRule>;
+
+  return {
+    fields,
+    onUnsupported,
+  };
+};
+
+const describeValue = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint" ||
+    value === null ||
+    value === undefined
+  ) {
+    return String(value);
+  }
+
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized ?? Object.prototype.toString.call(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+};
+
+const formatRecordId = (value: RecordId | StringRecordId): string => {
+  if (value instanceof StringRecordId) {
+    return value.toString();
+  }
+
+  const { table, id } = value;
+  if (typeof table === "string" && (typeof id === "string" || typeof id === "number")) {
+    return `${String(table)}:${String(id)}`;
+  }
+
+  return String(value);
+};
+
+const toSurrealStringLiteral = (value: string): string =>
+  `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
+
+const buildSchemaAssertionPredicates = ({
+  model,
+  field,
+  fieldType,
+  rule,
+  onUnsupported,
+}: {
+  model: string;
+  field: string;
+  fieldType: SchemaField["type"];
+  rule: SurrealSchemaAssertionRule;
+  onUnsupported: (message: string) => void;
+}): string[] => {
+  const predicates: string[] = [];
+  const fieldPath = `${model}.${field}`;
+
+  if (rule.email) {
+    if (fieldType !== "string") {
+      onUnsupported(
+        `schemaAssertions email for "${fieldPath}" requires a string field, received "${String(fieldType)}".`,
+      );
+    } else {
+      predicates.push("string::is_email($value)");
+    }
+  }
+
+  if (rule.minLength !== undefined) {
+    if (fieldType !== "string") {
+      onUnsupported(
+        `schemaAssertions minLength for "${fieldPath}" requires a string field, received "${String(fieldType)}".`,
+      );
+    } else {
+      predicates.push(`string::len($value) >= ${rule.minLength}`);
+    }
+  }
+
+  if (rule.maxLength !== undefined) {
+    if (fieldType !== "string") {
+      onUnsupported(
+        `schemaAssertions maxLength for "${fieldPath}" requires a string field, received "${String(fieldType)}".`,
+      );
+    } else {
+      predicates.push(`string::len($value) <= ${rule.maxLength}`);
+    }
+  }
+
+  if (rule.pattern !== undefined) {
+    if (fieldType !== "string") {
+      onUnsupported(
+        `schemaAssertions pattern for "${fieldPath}" requires a string field, received "${String(fieldType)}".`,
+      );
+    } else {
+      predicates.push(`string::matches($value, ${toSurrealStringLiteral(rule.pattern)})`);
+    }
+  }
+
+  if (rule.min !== undefined) {
+    if (fieldType !== "number") {
+      onUnsupported(
+        `schemaAssertions min for "${fieldPath}" requires a number field, received "${String(fieldType)}".`,
+      );
+    } else {
+      predicates.push(`$value >= ${rule.min}`);
+    }
+  }
+
+  if (rule.max !== undefined) {
+    if (fieldType !== "number") {
+      onUnsupported(
+        `schemaAssertions max for "${fieldPath}" requires a number field, received "${String(fieldType)}".`,
+      );
+    } else {
+      predicates.push(`$value <= ${rule.max}`);
+    }
+  }
+
+  return predicates;
+};
+
 export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConfig = {}) => {
   const adapterError = (message: string, cause?: unknown) =>
     new Error(`[surrealdb-adapter] ${message}`, cause === undefined ? undefined : { cause });
 
-  const toStringRecordId = (value: unknown, expectedTable?: string): StringRecordId => {
-    const asString =
-      value instanceof StringRecordId || value instanceof RecordId
-        ? value.toString()
-        : typeof value === "string"
-          ? value
-          : null;
+  const referenceDeleteBehavior = validateReferenceDeleteBehaviorConfig(
+    config.referenceDeleteBehavior,
+    (message) => {
+      throw adapterError(message);
+    },
+  );
 
-    if (!asString) {
-      throw adapterError(
-        `Expected a Surreal record id for ${expectedTable ?? "record"}, received "${String(value)}".`,
-      );
-    }
+  const schemaAssertions = validateSchemaAssertionsConfig(config.schemaAssertions, (message) => {
+    throw adapterError(message);
+  });
 
-    const separator = asString.indexOf(":");
-    const table = separator > 0 ? asString.slice(0, separator) : "";
-    const id = separator > -1 ? asString.slice(separator + 1) : "";
+  const parseRecordIdParts = (value: string, expectedTable?: string) => {
+    const separator = value.indexOf(":");
+    const table = separator > 0 ? value.slice(0, separator) : "";
+    const id = separator > -1 ? value.slice(separator + 1) : "";
+
     if (!table || !id) {
-      throw adapterError(`Invalid record id "${asString}". Expected the format "table:id".`);
+      throw adapterError(`Invalid record id "${value}". Expected the format "table:id".`);
     }
 
     if (expectedTable && table !== expectedTable) {
       throw adapterError(
-        `Record id "${asString}" references table "${table}", expected "${expectedTable}".`,
+        `Record id "${value}" references table "${table}", expected "${expectedTable}".`,
       );
     }
 
-    return new StringRecordId(asString);
+    return { table, id };
+  };
+
+  const toRecordReference = (value: unknown, expectedTable?: string): RecordId => {
+    if (value instanceof RecordId) {
+      const table = value.table;
+      if (typeof table !== "string") {
+        throw adapterError(
+          `Expected a Surreal record id for ${expectedTable ?? "record"}, received "${formatRecordId(value)}".`,
+        );
+      }
+      if (expectedTable && table !== expectedTable) {
+        throw adapterError(
+          `Record id "${formatRecordId(value)}" references table "${String(table)}", expected "${String(expectedTable)}".`,
+        );
+      }
+      return value;
+    }
+
+    const asString =
+      value instanceof StringRecordId ? value.toString() : typeof value === "string" ? value : null;
+
+    if (!asString) {
+      throw adapterError(
+        `Expected a Surreal record id for ${expectedTable ?? "record"}, received "${describeValue(value)}".`,
+      );
+    }
+
+    const { table, id } = parseRecordIdParts(asString, expectedTable);
+    return new RecordId(table, id);
   };
 
   const toRecordIdInput = (
     value: unknown,
     expectedTable?: string,
-  ): StringRecordId | StringRecordId[] | null | undefined => {
+  ): RecordId | RecordId[] | null | undefined => {
     if (value === null || value === undefined) return value;
     if (Array.isArray(value)) {
-      return value.map((entry) => toStringRecordId(entry, expectedTable));
+      // Defensive support for list-shaped id/reference values.
+      return value.map((entry) => toRecordReference(entry, expectedTable));
     }
-    return toStringRecordId(value, expectedTable);
+    return toRecordReference(value, expectedTable);
   };
 
   const resolveRecordIdFormat = (resolver: RecordIdFormatResolver | undefined, model: string) => {
     const raw = typeof resolver === "function" ? resolver({ model }) : (resolver ?? "native");
+    // Runtime guard for JS callers or unsafe casts that bypass the TypeScript union.
     if (!SUPPORTED_RECORD_ID_FORMATS.includes(raw)) {
       throw adapterError(
         `Unsupported recordIdFormat "${String(raw)}". Supported values are "native", "uuidv7", and "ulid".`,
@@ -182,11 +488,12 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     return escapedTable;
   };
 
-  const resolveSchemaType = (
-    modelName: string,
-    fieldName: string,
-    fieldType: SchemaField["type"],
-  ) => {
+  const resolveSchemaType = (modelName: string, fieldName: string, field: SchemaField) => {
+    if (field.type === "number" && field.bigint) {
+      return "int" satisfies SurrealSchemaFieldType;
+    }
+
+    const fieldType = field.type;
     if (!isSupportedSchemaFieldType(fieldType)) {
       throw adapterError(
         `Unsupported schema field type "${String(fieldType)}" for "${modelName}.${fieldName}".`,
@@ -195,29 +502,199 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     return FIELD_TYPE_MAP[fieldType];
   };
 
+  const isMappedReferenceDeleteBehavior = (
+    v: string,
+  ): v is keyof typeof BETTER_AUTH_REFERENCE_DELETE_BEHAVIOR_MAP =>
+    v in BETTER_AUTH_REFERENCE_DELETE_BEHAVIOR_MAP;
+
+  const resolveReferenceDeleteBehavior = ({
+    model,
+    field,
+    reference,
+  }: {
+    model: string;
+    field: string;
+    reference: NonNullable<SchemaField["references"]>;
+  }): SurrealReferenceDeleteBehavior => {
+    const overrideKey = `${model}.${field}`;
+
+    const override = referenceDeleteBehavior?.overrides[overrideKey];
+    if (override !== undefined) return override;
+
+    const { onDelete } = reference;
+    if (onDelete !== undefined) {
+      if (!isMappedReferenceDeleteBehavior(onDelete)) {
+        throw adapterError(
+          `Unsupported Better Auth onDelete behavior "${onDelete}" for "${overrideKey}".`,
+        );
+      }
+      return BETTER_AUTH_REFERENCE_DELETE_BEHAVIOR_MAP[onDelete];
+    }
+
+    return referenceDeleteBehavior?.default ?? "cascade";
+  };
+
+  const buildSchemaAssertionClause = ({
+    model,
+    field,
+    fieldAttributes,
+  }: {
+    model: string;
+    field: string;
+    fieldAttributes: SchemaField;
+  }): string => {
+    const rule = schemaAssertions?.fields[`${model}.${field}`];
+    if (!rule) return "";
+
+    const failUnsupported = (message: string) => {
+      if (schemaAssertions?.onUnsupported === "error") {
+        throw adapterError(message);
+      }
+    };
+    const predicates = buildSchemaAssertionPredicates({
+      model,
+      field,
+      fieldType: fieldAttributes.type,
+      rule,
+      onUnsupported: failUnsupported,
+    });
+
+    if (predicates.length === 0) return "";
+
+    const condition = predicates.length === 1 ? predicates[0]! : predicates.join(" AND ");
+    return ` ASSERT ${fieldAttributes.required ? condition : `$value = NONE OR (${condition})`}`;
+  };
+
+  const generateSchemaCode = ({
+    file,
+    tables,
+    getModelName,
+    getFieldName,
+  }: {
+    file?: string | undefined;
+    tables: BetterAuthDBSchema;
+    getModelName: (model: string) => string;
+    getFieldName: ({ model, field }: { model: string; field: string }) => string;
+  }) => {
+    const buildIndexName = (tableName: string, fieldName: string): string => {
+      const normalizedTable = tableName.replace(/`/g, "").toLowerCase();
+      const normalizedField = fieldName.replace(/`/g, "");
+      const capitalizedField = normalizedField
+        ? normalizedField.charAt(0).toUpperCase() + normalizedField.slice(1)
+        : "";
+      return `${normalizedTable}${capitalizedField}_idx`;
+    };
+
+    const buildSchemaFieldLines = ({
+      modelKey,
+      tableModelName,
+      tableName,
+      fieldKey,
+      field,
+    }: {
+      modelKey: string;
+      tableModelName: string;
+      tableName: string;
+      fieldKey: string;
+      field: SchemaField & { index?: boolean };
+    }): string[] => {
+      const dbFieldName = field.fieldName ?? fieldKey;
+      if (dbFieldName === "id") return [];
+
+      const resolvedField = toEscapedFieldIdent(
+        getFieldName({ model: tableModelName, field: dbFieldName }),
+      );
+      const fieldType = field.references
+        ? `record<${toTableIdent(getModelName(field.references.model))}>`
+        : resolveSchemaType(tableModelName, dbFieldName, field);
+      const requiredType = field.required ? fieldType : `option<${fieldType}>`;
+      const referenceClause = field.references
+        ? ` REFERENCE ON DELETE ${
+            SURREAL_REFERENCE_DELETE_BEHAVIOR_MAP[
+              resolveReferenceDeleteBehavior({
+                model: modelKey,
+                field: fieldKey,
+                reference: field.references,
+              })
+            ]
+          }`
+        : "";
+      const assertionClause = buildSchemaAssertionClause({
+        model: modelKey,
+        field: fieldKey,
+        fieldAttributes: field,
+      });
+      const fieldDefinition = `DEFINE FIELD OVERWRITE ${resolvedField} ON TABLE ${tableName} TYPE ${requiredType}${referenceClause}${assertionClause};`;
+      if (!field.unique && !field.index) return [fieldDefinition];
+
+      const indexName = buildIndexName(tableName, resolvedField);
+      const uniquenessClause = field.unique ? " UNIQUE" : "";
+      const indexDefinition = `DEFINE INDEX OVERWRITE ${escapeIdent(indexName)} ON TABLE ${tableName} COLUMNS ${resolvedField}${uniquenessClause};`;
+      return [fieldDefinition, indexDefinition];
+    };
+
+    const schemaLines = Object.entries(tables).flatMap(([modelKey, table]) => {
+      const tableName = toTableIdent(getModelName(table.modelName));
+      const fieldLines = Object.entries(table.fields).flatMap(([fieldKey, field]) =>
+        buildSchemaFieldLines({
+          modelKey,
+          tableModelName: table.modelName,
+          tableName,
+          fieldKey,
+          field,
+        }),
+      );
+
+      return [`DEFINE TABLE OVERWRITE ${tableName} SCHEMAFULL;`, ...fieldLines, ""];
+    });
+
+    const accessStatement = (() => {
+      if (typeof config.defineAccess === "function") {
+        const bound = config.defineAccess();
+        if (Object.keys(bound.bindings).length > 0) {
+          const placeholders = Object.keys(bound.bindings).map((key) => `$${key}`);
+          throw adapterError(
+            `defineAccess must not include bindings in schema generation. Use static surql or inline dynamic values with raw(...). Found: ${placeholders.join(", ")}.`,
+          );
+        }
+        const statement = bound.query.trim();
+        return statement.length > 0 ? statement : null;
+      }
+      return null;
+    })();
+
+    const lines = accessStatement
+      ? [
+          ...schemaLines,
+          accessStatement.endsWith(";") ? accessStatement : `${accessStatement};`,
+          "",
+        ]
+      : schemaLines;
+
+    const suggestedPath = file ? file.replace(/\.[^/.]+$/, ".surql") : ".better-auth/schema.surql";
+    return {
+      code: lines.join("\n"),
+      path: suggestedPath,
+    };
+  };
+
   const normalizeDateValue = (value: unknown) =>
     value instanceof DateTime ? value.toDate() : value;
 
-  const normalizeRecordIdValue = (value: unknown) => {
-    const asString =
-      value instanceof RecordId || value instanceof StringRecordId
-        ? value.toString()
-        : typeof value === "string"
-          ? value
-          : null;
-
-    if (!asString) return value;
-    try {
-      return new StringRecordId(asString).toString();
-    } catch {
-      return asString;
+  const normalizeRecordIdValue = (value: unknown): unknown => {
+    if (value instanceof RecordId || value instanceof StringRecordId) {
+      return formatRecordId(value);
     }
+
+    return value;
   };
 
+  // `field` is pre-escaped with `escapeIdent`; only the value is parameterized here.
   const startsWithExpr = (field: string, value: string): Expr => ({
     toSQL: (ctx) => `string::starts_with(${field}, ${ctx.def(value)})`,
   });
 
+  // `field` is pre-escaped with `escapeIdent`; only the value is parameterized here.
   const endsWithExpr = (field: string, value: string): Expr => ({
     toSQL: (ctx) => `string::ends_with(${field}, ${ctx.def(value)})`,
   });
@@ -248,10 +725,10 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     "starts_with",
     "ends_with",
   ] as const satisfies readonly SupportedWhereOperator[];
-  const supportedWhereOperatorSet = new Set<SupportedWhereOperator>(supportedWhereOperators);
+  const supportedWhereOperatorSet: ReadonlySet<string> = new Set(supportedWhereOperators);
 
   const isSupportedWhereOperator = (value: unknown): value is SupportedWhereOperator =>
-    typeof value === "string" && supportedWhereOperatorSet.has(value as SupportedWhereOperator);
+    typeof value === "string" && supportedWhereOperatorSet.has(value);
 
   const expectStringValue = (value: unknown, operator: "starts_with" | "ends_with"): string => {
     if (typeof value === "string") return value;
@@ -266,7 +743,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
   const resolveWhereOperator = (value: unknown): SupportedWhereOperator => {
     if (value === undefined) return "eq";
     if (isSupportedWhereOperator(value)) return value;
-    throw adapterError(`Unsupported where operator "${String(value)}".`);
+    throw adapterError(`Unsupported where operator "${describeValue(value)}".`);
   };
 
   const buildUpdateSetStatement = (
@@ -282,7 +759,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         } as const;
       }
 
-      const key = `update_${index}`;
+      const key = `__upd_${index}__`;
       return {
         assignment: `${toEscapedFieldIdent(field)} = $${key}`,
         binding: [key, value] as const,
@@ -318,81 +795,6 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     value: unknown,
   ): Expr => whereOperatorExprBuilders[operator](field, value);
 
-  const generateSchemaCode = ({
-    file,
-    tables,
-    getModelName,
-    getFieldName,
-  }: {
-    file?: string | undefined;
-    tables: BetterAuthDBSchema;
-    getModelName: (model: string) => string;
-    getFieldName: ({ model, field }: { model: string; field: string }) => string;
-  }) => {
-    const buildIndexName = (tableName: string, fieldName: string): string => {
-      const normalizedTable = tableName.replace(/`/g, "").toLowerCase();
-      const normalizedField = fieldName.replace(/`/g, "");
-      const capitalizedField = normalizedField
-        ? normalizedField.charAt(0).toUpperCase() + normalizedField.slice(1)
-        : "";
-      return `${normalizedTable}${capitalizedField}_idx`;
-    };
-
-    const schemaLines = Object.values(tables).flatMap((table) => {
-      const tableName = toTableIdent(getModelName(table.modelName));
-      const fieldLines = Object.entries(table.fields).flatMap(([fieldKey, field]) => {
-        const dbFieldName = field.fieldName ?? fieldKey;
-        if (dbFieldName === "id") return [];
-
-        const resolvedField = toEscapedFieldIdent(
-          getFieldName({ model: table.modelName, field: dbFieldName }),
-        );
-        const fieldType = field.references
-          ? `record<${toTableIdent(getModelName(field.references.model))}>`
-          : resolveSchemaType(table.modelName, dbFieldName, field.type);
-        const requiredType = field.required ? fieldType : `option<${fieldType}>`;
-        const fieldDefinition = `DEFINE FIELD OVERWRITE ${resolvedField} ON TABLE ${tableName} TYPE ${requiredType};`;
-        if (!field.unique && !field.index) return [fieldDefinition];
-
-        const indexName = buildIndexName(tableName, resolvedField);
-        const uniquenessClause = field.unique ? " UNIQUE" : "";
-        const indexDefinition = `DEFINE INDEX OVERWRITE ${escapeIdent(indexName)} ON TABLE ${tableName} COLUMNS ${resolvedField}${uniquenessClause};`;
-        return [fieldDefinition, indexDefinition];
-      });
-
-      return [`DEFINE TABLE OVERWRITE ${tableName} SCHEMAFULL;`, ...fieldLines, ""];
-    });
-
-    const accessStatement = (() => {
-      if (typeof config.defineAccess === "function") {
-        const bound = config.defineAccess();
-        if (Object.keys(bound.bindings).length > 0) {
-          const placeholders = Object.keys(bound.bindings).map((key) => `$${key}`);
-          throw adapterError(
-            `defineAccess must not include bindings in schema generation. Use static surql or inline dynamic values with raw(...). Found: ${placeholders.join(", ")}.`,
-          );
-        }
-        const statement = bound.query.trim();
-        return statement.length > 0 ? statement : null;
-      }
-      return null;
-    })();
-
-    const lines = accessStatement
-      ? [
-          ...schemaLines,
-          accessStatement.endsWith(";") ? accessStatement : `${accessStatement};`,
-          "",
-        ]
-      : schemaLines;
-
-    const suggestedPath = file ? file.replace(/\.[^/.]+$/, ".surql") : ".better-auth/schema.surql";
-    return {
-      code: lines.join("\n"),
-      path: suggestedPath,
-    };
-  };
-
   const supportsTransactions = (): boolean => {
     if (config.transaction === false) return false;
     if (typeof client.beginTransaction !== "function") return false;
@@ -403,8 +805,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
   const buildWhereClause = (where: CleanedWhere[] | undefined): BoundQuery => {
     if (!where || where.length === 0) return new BoundQuery("");
 
-    const [first] = where;
-    if (!first) return new BoundQuery("");
+    const first = where[0]!;
 
     const toConditionExpr = (item: CleanedWhere): Expr => {
       const field = toEscapedFieldIdent(item.field);
@@ -428,17 +829,14 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
       getFieldName,
       getModelName,
     }: Parameters<NonNullable<AdapterFactoryOptions["adapter"]>>[0]) => {
-      const resolveTableName = getModelName;
-
       const execQuery = async <T>(query: BoundQuery) =>
         toResultRows<T>(await db.query<QueryRows<T>>(query.query, query.bindings));
 
       const execQueryFirst = async <T>(query: BoundQuery) => (await execQuery<T>(query))[0] ?? null;
 
-      const appendWhereClause = (query: BoundQuery, whereClause: BoundQuery) => {
-        if (!whereClause.query) return query;
+      const appendWhereClause = (query: BoundQuery, whereClause: BoundQuery): void => {
+        if (!whereClause.query) return;
         query.append(new BoundQuery(` ${whereClause.query}`, whereClause.bindings));
-        return query;
       };
 
       const buildSelectColumns = (model: string, select?: string[]) =>
@@ -447,7 +845,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           : "*";
 
       const countRecords = async (model: string, where?: CleanedWhere[]) => {
-        const tableName = toTableIdent(resolveTableName(model));
+        const tableName = toTableIdent(getModelName(model));
         const whereClause = buildWhereClause(where);
         const query = new BoundQuery(`SELECT count() AS total FROM ${tableName}`);
         appendWhereClause(query, whereClause);
@@ -466,7 +864,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           data: T;
           select?: string[] | undefined;
         }): Promise<T> {
-          const table = resolveTableName(model);
+          const table = getModelName(model);
           const format = resolveRecordIdFormat(config.recordIdFormat, table);
 
           const query = new BoundQuery(
@@ -488,7 +886,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           where: CleanedWhere[];
           select?: string[] | undefined;
         }): Promise<T | null> {
-          const tableName = toTableIdent(resolveTableName(model));
+          const tableName = toTableIdent(getModelName(model));
           const whereClause = buildWhereClause(where);
           const query = new BoundQuery(
             `SELECT ${buildSelectColumns(model, select)} FROM ${tableName}`,
@@ -514,7 +912,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           sortBy?: { field: string; direction: "asc" | "desc" } | undefined;
           offset?: number | undefined;
         }): Promise<T[]> {
-          const tableName = toTableIdent(resolveTableName(model));
+          const tableName = toTableIdent(getModelName(model));
           const whereClause = buildWhereClause(where);
           const query = new BoundQuery(
             `SELECT ${buildSelectColumns(model, select)} FROM ${tableName}`,
@@ -564,10 +962,12 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
 
           const { setClause, bindings } = buildUpdateSetStatement(update);
 
-          const tableName = toTableIdent(resolveTableName(model));
+          const tableName = toTableIdent(getModelName(model));
           const whereClause = buildWhereClause(where);
 
           if (!setClause) {
+            // Better Auth may pass update payloads whose fields normalize to `undefined`.
+            // In that case we treat the operation as a no-op and return the current record.
             const query = new BoundQuery(`SELECT * FROM ${tableName}`);
             appendWhereClause(query, whereClause);
             query.append(" LIMIT 1;");
@@ -589,7 +989,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           where: CleanedWhere[];
           update: Record<string, unknown>;
         }): Promise<number> {
-          const tableName = toTableIdent(resolveTableName(model));
+          const tableName = toTableIdent(getModelName(model));
           const whereClause = buildWhereClause(where);
           const { setClause, bindings } = buildUpdateSetStatement(update);
           if (!setClause) return 0;
@@ -602,8 +1002,10 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
         },
 
         async delete({ model, where }: { model: string; where: CleanedWhere[] }): Promise<void> {
-          const tableName = toTableIdent(resolveTableName(model));
+          const tableName = toTableIdent(getModelName(model));
           const whereClause = buildWhereClause(where);
+          // Better Auth single-record delete paths are expected to resolve to one row.
+          // `DELETE ONLY` preserves that contract and lets Surreal reject ambiguous filters.
           const query = new BoundQuery(`DELETE ONLY ${tableName}`);
           appendWhereClause(query, whereClause);
           query.append(" RETURN BEFORE;");
@@ -617,7 +1019,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           model: string;
           where: CleanedWhere[];
         }): Promise<number> {
-          const tableName = toTableIdent(resolveTableName(model));
+          const tableName = toTableIdent(getModelName(model));
           const whereClause = buildWhereClause(where);
           const query = new BoundQuery(`DELETE ${tableName}`);
           appendWhereClause(query, whereClause);

@@ -62,7 +62,7 @@ const createPasskeyRow = async (
     userId: string;
     name?: string;
     credentialID: string;
-  },
+  }
 ) =>
   await context.adapter.create<PasskeyRow>({
     model: "passkey",
@@ -109,16 +109,25 @@ describe("Plugin - Passkey", () => {
   it("adds the passkey table and fields to generated schema and live metadata", async () => {
     const context = requireContext();
     const authOptions = context.auth.options as BetterAuthOptions;
-    const schema = await context.adapter.createSchema?.(authOptions, "passkey-plugin-live.surql");
-
-    expect(schema?.code).toMatch(/DEFINE TABLE(?: OVERWRITE)? passkey SCHEMAFULL;/);
-    expect(schema?.code).toMatch(/DEFINE FIELD(?: OVERWRITE)? userId ON TABLE passkey TYPE [^;]+;/);
-    expect(schema?.code).toMatch(
-      /DEFINE FIELD(?: OVERWRITE)? credentialID ON TABLE passkey TYPE [^;]+;/,
+    const schema = await context.adapter.createSchema?.(
+      authOptions,
+      "passkey-plugin-live.surql"
     );
-    expect(schema?.code).toMatch(/DEFINE INDEX(?: OVERWRITE)? `?passkeyUserId_idx`? ON TABLE passkey COLUMNS userId;/);
+
     expect(schema?.code).toMatch(
-      /DEFINE INDEX(?: OVERWRITE)? `?passkeyCredentialID_idx`? ON TABLE passkey COLUMNS credentialID;/,
+      /DEFINE TABLE(?: OVERWRITE)? passkey SCHEMAFULL;/
+    );
+    expect(schema?.code).toMatch(
+      /DEFINE FIELD(?: OVERWRITE)? userId ON TABLE passkey TYPE [^;]+ REFERENCE ON DELETE CASCADE;/
+    );
+    expect(schema?.code).toMatch(
+      /DEFINE FIELD(?: OVERWRITE)? credentialID ON TABLE passkey TYPE [^;]+;/
+    );
+    expect(schema?.code).toMatch(
+      /DEFINE INDEX(?: OVERWRITE)? `?passkeyUserId_idx`? ON TABLE passkey COLUMNS userId;/
+    );
+    expect(schema?.code).toMatch(
+      /DEFINE INDEX(?: OVERWRITE)? `?passkeyCredentialID_idx`? ON TABLE passkey COLUMNS credentialID;/
     );
 
     const tableInfo = await context.db.query("INFO FOR TABLE passkey;");
@@ -127,17 +136,25 @@ describe("Plugin - Passkey", () => {
         | Record<string, string>
         | undefined) ?? {};
 
-    expect(fields.userId).toMatch(/DEFINE FIELD userId ON passkey TYPE (none \| )?record<user>/);
+    expect(fields.userId).toMatch(
+      /DEFINE FIELD userId ON passkey TYPE (none \| )?record<user> REFERENCE ON DELETE CASCADE/
+    );
     expect(fields.credentialID).toMatch(
-      /DEFINE FIELD credentialID ON passkey TYPE (none \| )?string\b/,
+      /DEFINE FIELD credentialID ON passkey TYPE (none \| )?string\b/
     );
   });
 
   it("lists only the authenticated user's passkeys", async () => {
     const context = requireContext();
     const api = asPasskeyApi(context.auth.api);
-    const owner = await createUserWithHeaders(context, "passkey-owner@example.com");
-    const other = await createUserWithHeaders(context, "passkey-other@example.com");
+    const owner = await createUserWithHeaders(
+      context,
+      "passkey-owner@example.com"
+    );
+    const other = await createUserWithHeaders(
+      context,
+      "passkey-other@example.com"
+    );
 
     const ownedA = await createPasskeyRow(context, {
       userId: owner.user.id,
@@ -160,14 +177,19 @@ describe("Plugin - Passkey", () => {
     })) as PasskeyRow[];
 
     expect(listed).toHaveLength(2);
-    expect(listed.map((row) => row.id).sort()).toEqual([ownedA.id, ownedB.id].sort());
+    expect(listed.map((row) => row.id).sort()).toEqual(
+      [ownedA.id, ownedB.id].sort()
+    );
     expect(listed.every((row) => row.userId === owner.user.id)).toBe(true);
   });
 
   it("updates and deletes an owned passkey through the plugin endpoints", async () => {
     const context = requireContext();
     const api = asPasskeyApi(context.auth.api);
-    const owner = await createUserWithHeaders(context, "passkey-update-owner@example.com");
+    const owner = await createUserWithHeaders(
+      context,
+      "passkey-update-owner@example.com"
+    );
     const row = await createPasskeyRow(context, {
       userId: owner.user.id,
       name: "Initial Passkey Name",
@@ -208,8 +230,14 @@ describe("Plugin - Passkey", () => {
   it("rejects updating or deleting another user's passkey", async () => {
     const context = requireContext();
     const api = asPasskeyApi(context.auth.api);
-    const owner = await createUserWithHeaders(context, "passkey-forbidden-owner@example.com");
-    const other = await createUserWithHeaders(context, "passkey-forbidden-other@example.com");
+    const owner = await createUserWithHeaders(
+      context,
+      "passkey-forbidden-owner@example.com"
+    );
+    const other = await createUserWithHeaders(
+      context,
+      "passkey-forbidden-other@example.com"
+    );
     const row = await createPasskeyRow(context, {
       userId: owner.user.id,
       name: "Protected Passkey",
