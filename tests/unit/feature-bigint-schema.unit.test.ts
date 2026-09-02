@@ -42,10 +42,8 @@ describe("Feature - Bigint Schema (Mocked)", () => {
     const schema = await adapter.createSchema?.(options, "bigint-schema.surql");
 
     expect(schema?.code).toContain(
-      "DEFINE FIELD OVERWRITE lastRequest ON TABLE rateLimit TYPE int;"
+      "DEFINE FIELD OVERWRITE lastRequest ON TABLE rateLimit TYPE int;",
     );
-    expect(schema?.code).toContain(
-      "DEFINE FIELD OVERWRITE count ON TABLE rateLimit TYPE number;"
-    );
+    expect(schema?.code).toContain("DEFINE FIELD OVERWRITE count ON TABLE rateLimit TYPE number;");
   });
 });

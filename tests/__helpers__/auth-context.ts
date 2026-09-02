@@ -5,6 +5,7 @@ import { testUtils } from "better-auth/plugins";
 import { Surreal } from "surrealdb";
 
 import { surrealAdapter } from "../../src";
+
 import { createTestDbConnection, truncateAuthTables } from "./db";
 
 type SetupAuthContextOptions = {

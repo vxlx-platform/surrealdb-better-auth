@@ -251,7 +251,8 @@ DEFINE ACCESS OVERWRITE manual_access ON DATABASE
   it("rejects defineAccess queries that contain bindings", async () => {
     const schemaPromise = generateSchema(
       {
-        defineAccess: () => surql`DEFINE ACCESS OVERWRITE ${"bound_name"} ON DATABASE TYPE API KEY;`,
+        defineAccess: () =>
+          surql`DEFINE ACCESS OVERWRITE ${"bound_name"} ON DATABASE TYPE API KEY;`,
       },
       "jwt-jwks-bound-query.surql",
     );

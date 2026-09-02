@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { BetterAuthOptions } from "better-auth";
 import { admin } from "better-auth/plugins";
 import { adminAc, userAc } from "better-auth/plugins/admin/access";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";

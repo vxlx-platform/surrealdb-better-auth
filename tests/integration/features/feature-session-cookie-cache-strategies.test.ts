@@ -1,11 +1,6 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { BetterAuthOptions } from "better-auth";
-import {
-  getCookieCache,
-  getCookies,
-  parseCookies,
-  setCookieToHeader,
-} from "better-auth/cookies";
+import { getCookieCache, getCookies, parseCookies, setCookieToHeader } from "better-auth/cookies";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";

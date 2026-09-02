@@ -21,13 +21,7 @@ describe("Auth Flow - Verification Token Lifecycle", () => {
     context = await setupAuthContext({
       emailAndPassword: {
         enabled: true,
-        sendResetPassword: async ({
-          user,
-          token,
-        }: {
-          user: { email: string };
-          token: string;
-        }) => {
+        sendResetPassword: async ({ user, token }: { user: { email: string }; token: string }) => {
           resetTokens.set(user.email.toLowerCase(), token);
         },
       },
@@ -150,5 +144,4 @@ describe("Auth Flow - Verification Token Lifecycle", () => {
     });
     expect(verificationRows).toHaveLength(0);
   });
-
 });

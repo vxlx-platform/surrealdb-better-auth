@@ -73,10 +73,7 @@ const buildAdapter = () => {
 describe("Feature - Schema Assertions (Mocked)", () => {
   it("emits ASSERT clauses for supported simple field rules", async () => {
     const { adapter, options } = buildAdapter();
-    const schema = await adapter.createSchema?.(
-      options,
-      "schema-assertions.surql",
-    );
+    const schema = await adapter.createSchema?.(options, "schema-assertions.surql");
 
     expect(schema?.code).toContain(
       "DEFINE FIELD OVERWRITE email ON TABLE user TYPE string ASSERT string::is_email($value);",

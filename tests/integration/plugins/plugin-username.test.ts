@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { BetterAuthOptions } from "better-auth";
 import { username } from "better-auth/plugins";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";
@@ -34,9 +34,7 @@ type UsernameApi = {
   signInUsername: (input: {
     body: { username: string; password: string };
   }) => Promise<{ user: { id: string; email: string } }>;
-  isUsernameAvailable: (input: {
-    body: { username: string };
-  }) => Promise<{ available: boolean }>;
+  isUsernameAvailable: (input: { body: { username: string } }) => Promise<{ available: boolean }>;
 };
 
 const withUsernameFields = <T extends object>(user: T): T & UsernameFields =>
@@ -76,9 +74,7 @@ describe("Live DB - Username Plugin", () => {
     const schema = await context.adapter.createSchema?.(authOptions, "username-plugin-live.surql");
 
     expect(schema?.code).toBeDefined();
-    expect(schema?.code).toMatch(
-      /DEFINE FIELD(?: OVERWRITE)? username ON TABLE user TYPE [^;]+;/,
-    );
+    expect(schema?.code).toMatch(/DEFINE FIELD(?: OVERWRITE)? username ON TABLE user TYPE [^;]+;/);
     expect(schema?.code).toMatch(
       /DEFINE FIELD(?: OVERWRITE)? displayUsername ON TABLE user TYPE [^;]+;/,
     );

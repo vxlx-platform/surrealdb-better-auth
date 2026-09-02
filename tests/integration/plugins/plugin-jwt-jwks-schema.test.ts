@@ -1,5 +1,5 @@
-import { jwt } from "better-auth/plugins";
 import type { BetterAuthOptions } from "better-auth";
+import { jwt } from "better-auth/plugins";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";

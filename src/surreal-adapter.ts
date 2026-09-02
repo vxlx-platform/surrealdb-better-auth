@@ -1,4 +1,5 @@
 import type { BetterAuthOptions } from "@better-auth/core";
+import type { BetterAuthDBSchema, DBFieldAttribute } from "@better-auth/core/db";
 import type {
   AdapterFactoryOptions,
   CleanedWhere,
@@ -7,7 +8,6 @@ import type {
   DBAdapterDebugLogOption,
 } from "@better-auth/core/db/adapter";
 import { createAdapterFactory } from "@better-auth/core/db/adapter";
-import type { BetterAuthDBSchema, DBFieldAttribute } from "@better-auth/core/db";
 import type { Expr, Surreal } from "surrealdb";
 import {
   BoundQuery,
@@ -1096,7 +1096,9 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           const { setClause: incrementClause, bindings: incrementBindings } =
             buildIncrementSetStatement(increment);
           const { setClause: absoluteClause, bindings: absoluteBindings } =
-            set && isPlainObject(set) ? buildUpdateSetStatement(set) : { setClause: "", bindings: {} };
+            set && isPlainObject(set)
+              ? buildUpdateSetStatement(set)
+              : { setClause: "", bindings: {} };
 
           const setClause = [incrementClause, absoluteClause].filter(Boolean).join(", ");
 

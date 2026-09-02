@@ -128,7 +128,12 @@ describe("Adapter Core - findMany Pagination/Sorting/Filtering", () => {
       model: "user",
       where: [
         { field: "emailVerified", operator: "eq", value: true },
-        { field: "createdAt", operator: "gte", value: new Date("2024-01-05T00:00:00.000Z"), connector: "AND" },
+        {
+          field: "createdAt",
+          operator: "gte",
+          value: new Date("2024-01-05T00:00:00.000Z"),
+          connector: "AND",
+        },
         { field: "email", operator: "eq", value: "alice@example.com", connector: "OR" },
       ],
       sortBy: { field: "name", direction: "asc" },

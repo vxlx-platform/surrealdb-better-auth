@@ -1,60 +1,35 @@
 {
   "name": "@vxlx/surrealdb-better-auth",
   "version": "0.10.0",
+  "description": "SurrealDB adapter for Better Auth",
+  "keywords": [
+    "adapter",
+    "auth",
+    "better-auth",
+    "surrealdb",
+    "typescript"
+  ],
+  "homepage": "https://github.com/vxlx-platform/surrealdb-better-auth#readme",
+  "bugs": {
+    "url": "https://github.com/vxlx-platform/surrealdb-better-auth/issues"
+  },
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vxlx-platform/surrealdb-better-auth.git"
   },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
-  "devDependencies": {
-    "@better-auth/core": "^1.7.2",
-    "@better-auth/passkey": "^1.7.2",
-    "@better-auth/utils": "0.4.2",
-    "@types/bun": "^1.4.0",
-    "@types/node": "^25.9.5",
-    "@vitest/browser-playwright": "^4.1.11",
-    "better-auth": "^1.7.2",
-    "oxfmt": "^0.37.0",
-    "oxlint": "^1.81.0",
-    "oxlint-tsgolint": "^0.16.0",
-    "playwright": "^1.62.1",
-    "surrealdb": "^2.0.8",
-    "tsdown": "^0.21.10",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.11"
-  },
-  "peerDependencies": {
-    "@better-auth/core": "^1.7.2",
-    "@better-auth/utils": "0.4.2",
-    "surrealdb": "^2.0.8"
-  },
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
       "dev-source": "./src/index.ts",
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
-    }
-  },
-  "bugs": {
-    "url": "https://github.com/vxlx-platform/surrealdb-better-auth/issues"
-  },
-  "description": "SurrealDB adapter for Better Auth",
-  "files": [
-    "dist"
-  ],
-  "homepage": "https://github.com/vxlx-platform/surrealdb-better-auth#readme",
-  "keywords": [
-    "auth",
-    "surrealdb",
-    "adapter",
-    "typescript",
-    "better-auth"
-  ],
-  "license": "MIT",
-  "peerDependenciesMeta": {
-    "surrealdb": {
-      "optional": true
     }
   },
   "publishConfig": {
@@ -78,6 +53,34 @@
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "typecheck": "bun run typecheck:src && bun run typecheck:tests"
   },
-  "type": "module",
-  "types": "./dist/index.d.mts"
+  "devDependencies": {
+    "@better-auth/core": "^1.7.2",
+    "@better-auth/passkey": "^1.7.2",
+    "@better-auth/utils": "0.4.2",
+    "@types/bun": "^1.4.0",
+    "@types/node": "^26.4.1",
+    "@vitest/browser-playwright": "^4.1.11",
+    "better-auth": "^1.7.2",
+    "oxfmt": "^0.66.0",
+    "oxlint": "^1.81.0",
+    "oxlint-tsgolint": "^7.0.2001",
+    "playwright": "^1.62.1",
+    "surrealdb": "^2.0.8",
+    "tsdown": "^0.21.10",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  },
+  "peerDependencies": {
+    "@better-auth/core": "^1.7.2",
+    "@better-auth/utils": "0.4.2",
+    "surrealdb": "^2.0.8"
+  },
+  "peerDependenciesMeta": {
+    "surrealdb": {
+      "optional": true
+    }
+  },
+  "overrides": {
+    "rolldown-plugin-dts": "^0.28.4"
+  }
 }

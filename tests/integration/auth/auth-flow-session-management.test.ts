@@ -8,7 +8,10 @@ describe("Auth Flow - Session Management", () => {
 
   type SessionApi = {
     listSessions: (input: { headers: Headers }) => Promise<Array<{ token: string }>>;
-    revokeSession: (input: { headers: Headers; body: { token: string } }) => Promise<{ status: boolean }>;
+    revokeSession: (input: {
+      headers: Headers;
+      body: { token: string };
+    }) => Promise<{ status: boolean }>;
     revokeOtherSessions: (input: { headers: Headers }) => Promise<{ status: boolean }>;
     revokeSessions: (input: { headers: Headers }) => Promise<{ status: boolean }>;
     signOut: (input: { headers: Headers }) => Promise<{ success: boolean } | { status: boolean }>;
@@ -40,10 +43,10 @@ describe("Auth Flow - Session Management", () => {
   const getSessionApi = (ctx: AuthContext): SessionApi => {
     const api = ctx.auth.api as Record<string, unknown>;
     return {
-      listSessions: requireApiMethod<[Parameters<SessionApi["listSessions"]>[0]], ReturnType<SessionApi["listSessions"]>>(
-        api,
-        "listSessions",
-      ),
+      listSessions: requireApiMethod<
+        [Parameters<SessionApi["listSessions"]>[0]],
+        ReturnType<SessionApi["listSessions"]>
+      >(api, "listSessions"),
       revokeSession: requireApiMethod<
         [Parameters<SessionApi["revokeSession"]>[0]],
         ReturnType<SessionApi["revokeSession"]>
@@ -56,10 +59,10 @@ describe("Auth Flow - Session Management", () => {
         [Parameters<SessionApi["revokeSessions"]>[0]],
         ReturnType<SessionApi["revokeSessions"]>
       >(api, "revokeSessions"),
-      signOut: requireApiMethod<[Parameters<SessionApi["signOut"]>[0]], ReturnType<SessionApi["signOut"]>>(
-        api,
-        "signOut",
-      ),
+      signOut: requireApiMethod<
+        [Parameters<SessionApi["signOut"]>[0]],
+        ReturnType<SessionApi["signOut"]>
+      >(api, "signOut"),
     };
   };
 
@@ -92,7 +95,9 @@ describe("Auth Flow - Session Management", () => {
       model: "session",
       where: [{ field: "userId", operator: "eq", value: userId }],
     });
-    return rows.map((row) => row.token).filter((token): token is string => typeof token === "string");
+    return rows
+      .map((row) => row.token)
+      .filter((token): token is string => typeof token === "string");
   };
 
   beforeAll(async () => {
@@ -178,7 +183,10 @@ describe("Auth Flow - Session Management", () => {
     if (!current || !other) throw new Error("Expected two sessions");
 
     const result = await api.signOut({ headers: current.headers });
-    expect((result as { success?: boolean; status?: boolean }).success ?? (result as { status?: boolean }).status).toBe(true);
+    expect(
+      (result as { success?: boolean; status?: boolean }).success ??
+        (result as { status?: boolean }).status,
+    ).toBe(true);
 
     const dbTokens = await getSessionTokensForUser(userId);
     expect(dbTokens).toHaveLength(1);

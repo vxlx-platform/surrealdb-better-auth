@@ -143,7 +143,9 @@ describe("Auth Flow - Email/Password", () => {
     expect(duplicateResponse.status).toBeGreaterThanOrEqual(400);
 
     const duplicatePayload = (await duplicateResponse.json()) as Record<string, unknown>;
-    expect(JSON.stringify(duplicatePayload).toLowerCase()).toMatch(/exist|duplicate|already|unique/);
+    expect(JSON.stringify(duplicatePayload).toLowerCase()).toMatch(
+      /exist|duplicate|already|unique/,
+    );
 
     const persistedCount = await context.adapter.count({
       model: "user",
@@ -155,10 +157,10 @@ describe("Auth Flow - Email/Password", () => {
   it("allows a user to update their own password via changePassword", async () => {
     const context = requireContext();
     const api = context.auth.api as Record<string, unknown>;
-    const changePassword = requireApiMethod<[Parameters<ChangePasswordMethod>[0]], ReturnType<ChangePasswordMethod>>(
-      api,
-      "changePassword",
-    );
+    const changePassword = requireApiMethod<
+      [Parameters<ChangePasswordMethod>[0]],
+      ReturnType<ChangePasswordMethod>
+    >(api, "changePassword");
 
     const email = "change-password@example.com";
     const currentPassword = "CurrentPassword123!";
@@ -258,10 +260,10 @@ describe("Auth Flow - Email Verification", () => {
       [Parameters<SendVerificationEmailMethod>[0]],
       ReturnType<SendVerificationEmailMethod>
     >(api, "sendVerificationEmail");
-    const verifyEmail = requireApiMethod<[Parameters<VerifyEmailMethod>[0]], ReturnType<VerifyEmailMethod>>(
-      api,
-      "verifyEmail",
-    );
+    const verifyEmail = requireApiMethod<
+      [Parameters<VerifyEmailMethod>[0]],
+      ReturnType<VerifyEmailMethod>
+    >(api, "verifyEmail");
 
     const email = "verify-me@example.com";
     const password = "VerifyPassword123!";

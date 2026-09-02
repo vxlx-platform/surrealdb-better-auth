@@ -85,52 +85,41 @@ const buildAdapter = (config?: Parameters<typeof surrealAdapter>[1]) => {
 describe("Adapter Core - Field/Model Remapping (Mocked Schema)", () => {
   it("emits remapped table and field names in generated schema", async () => {
     const { adapter, options } = buildAdapter();
-    const schema = await adapter.createSchema?.(
-      options,
-      "field-model-remapping.surql"
-    );
+    const schema = await adapter.createSchema?.(options, "field-model-remapping.surql");
 
+    expect(schema?.code).toContain("DEFINE TABLE OVERWRITE app_user SCHEMAFULL;");
     expect(schema?.code).toContain(
-      "DEFINE TABLE OVERWRITE app_user SCHEMAFULL;"
+      "DEFINE FIELD OVERWRITE display_name ON TABLE app_user TYPE string;",
     );
     expect(schema?.code).toContain(
-      "DEFINE FIELD OVERWRITE display_name ON TABLE app_user TYPE string;"
+      "DEFINE FIELD OVERWRITE email_address ON TABLE app_user TYPE string;",
     );
     expect(schema?.code).toContain(
-      "DEFINE FIELD OVERWRITE email_address ON TABLE app_user TYPE string;"
+      "DEFINE INDEX OVERWRITE app_userEmail_address_idx ON TABLE app_user COLUMNS email_address UNIQUE;",
+    );
+    expect(schema?.code).toContain("DEFINE TABLE OVERWRITE app_session SCHEMAFULL;");
+    expect(schema?.code).toContain(
+      "DEFINE FIELD OVERWRITE owner_id ON TABLE app_session TYPE record<app_user> REFERENCE ON DELETE CASCADE;",
     );
     expect(schema?.code).toContain(
-      "DEFINE INDEX OVERWRITE app_userEmail_address_idx ON TABLE app_user COLUMNS email_address UNIQUE;"
+      "DEFINE INDEX OVERWRITE app_sessionOwner_id_idx ON TABLE app_session COLUMNS owner_id;",
+    );
+    expect(schema?.code).toContain("DEFINE TABLE OVERWRITE app_account SCHEMAFULL;");
+    expect(schema?.code).toContain(
+      "DEFINE FIELD OVERWRITE provider_account_id ON TABLE app_account TYPE string;",
     );
     expect(schema?.code).toContain(
-      "DEFINE TABLE OVERWRITE app_session SCHEMAFULL;"
+      "DEFINE FIELD OVERWRITE owner_id ON TABLE app_account TYPE record<app_user> REFERENCE ON DELETE CASCADE;",
     );
     expect(schema?.code).toContain(
-      "DEFINE FIELD OVERWRITE owner_id ON TABLE app_session TYPE record<app_user> REFERENCE ON DELETE CASCADE;"
+      "DEFINE INDEX OVERWRITE app_accountOwner_id_idx ON TABLE app_account COLUMNS owner_id;",
+    );
+    expect(schema?.code).toContain("DEFINE TABLE OVERWRITE app_verification SCHEMAFULL;");
+    expect(schema?.code).toContain(
+      "DEFINE FIELD OVERWRITE verification_identifier ON TABLE app_verification TYPE string;",
     );
     expect(schema?.code).toContain(
-      "DEFINE INDEX OVERWRITE app_sessionOwner_id_idx ON TABLE app_session COLUMNS owner_id;"
-    );
-    expect(schema?.code).toContain(
-      "DEFINE TABLE OVERWRITE app_account SCHEMAFULL;"
-    );
-    expect(schema?.code).toContain(
-      "DEFINE FIELD OVERWRITE provider_account_id ON TABLE app_account TYPE string;"
-    );
-    expect(schema?.code).toContain(
-      "DEFINE FIELD OVERWRITE owner_id ON TABLE app_account TYPE record<app_user> REFERENCE ON DELETE CASCADE;"
-    );
-    expect(schema?.code).toContain(
-      "DEFINE INDEX OVERWRITE app_accountOwner_id_idx ON TABLE app_account COLUMNS owner_id;"
-    );
-    expect(schema?.code).toContain(
-      "DEFINE TABLE OVERWRITE app_verification SCHEMAFULL;"
-    );
-    expect(schema?.code).toContain(
-      "DEFINE FIELD OVERWRITE verification_identifier ON TABLE app_verification TYPE string;"
-    );
-    expect(schema?.code).toContain(
-      "DEFINE INDEX OVERWRITE app_verificationVerification_identifier_idx ON TABLE app_verification COLUMNS verification_identifier;"
+      "DEFINE INDEX OVERWRITE app_verificationVerification_identifier_idx ON TABLE app_verification COLUMNS verification_identifier;",
     );
   });
 
@@ -148,10 +137,7 @@ describe("Adapter Core - Field/Model Remapping (Mocked Schema)", () => {
     });
 
     expect(client.query).toHaveBeenCalled();
-    const [query, bindings] = client.query.mock.calls.at(-1) as [
-      string,
-      Record<string, unknown>,
-    ];
+    const [query, bindings] = client.query.mock.calls.at(-1) as [string, Record<string, unknown>];
     expect(query).toContain("FROM app_user");
     expect(query).toContain("email_address");
     expect(query).toContain("created_at");
@@ -184,10 +170,7 @@ describe("Adapter Core - Field/Model Remapping (Mocked Schema)", () => {
       },
     });
 
-    const [, bindings] = client.query.mock.calls.at(-1) as [
-      string,
-      Record<string, unknown>,
-    ];
+    const [, bindings] = client.query.mock.calls.at(-1) as [string, Record<string, unknown>];
     expect(bindings.data).toMatchObject({
       display_name: "Null Image User",
       email_address: "null-image@example.com",
@@ -204,16 +187,13 @@ describe("Adapter Core - Field/Model Remapping (Mocked Schema)", () => {
       },
     });
 
-    const schema = await adapter.createSchema?.(
-      options,
-      "field-model-remapping-overrides.surql"
-    );
+    const schema = await adapter.createSchema?.(options, "field-model-remapping-overrides.surql");
 
     expect(schema?.code).toContain(
-      "DEFINE FIELD OVERWRITE owner_id ON TABLE app_session TYPE record<app_user> REFERENCE ON DELETE REJECT;"
+      "DEFINE FIELD OVERWRITE owner_id ON TABLE app_session TYPE record<app_user> REFERENCE ON DELETE REJECT;",
     );
     expect(schema?.code).toContain(
-      "DEFINE FIELD OVERWRITE owner_id ON TABLE app_account TYPE record<app_user> REFERENCE ON DELETE CASCADE;"
+      "DEFINE FIELD OVERWRITE owner_id ON TABLE app_account TYPE record<app_user> REFERENCE ON DELETE CASCADE;",
     );
   });
 });

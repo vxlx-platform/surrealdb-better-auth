@@ -16,10 +16,7 @@ type SignUpResponse = {
 
 type OneTimeTokenApi = {
   generateOneTimeToken: (input: { headers: Headers }) => Promise<{ token: string }>;
-  verifyOneTimeToken: (input: {
-    body: { token: string };
-    asResponse?: boolean;
-  }) => Promise<
+  verifyOneTimeToken: (input: { body: { token: string }; asResponse?: boolean }) => Promise<
     | {
         session: {
           id: string;
@@ -181,7 +178,9 @@ describe("Plugin - One-Time Token", () => {
 
       const plainStored = await customContext.adapter.findOne<VerificationRow>({
         model: "verification",
-        where: [{ field: "identifier", operator: "eq", value: `one-time-token:${generated.token}` }],
+        where: [
+          { field: "identifier", operator: "eq", value: `one-time-token:${generated.token}` },
+        ],
       });
       expect(plainStored).toBeNull();
 
@@ -220,7 +219,10 @@ describe("Plugin - One-Time Token", () => {
 
     try {
       await customContext.reset();
-      const { response } = await signUpAndGetSession(customContext, "ott-disabled-client@example.com");
+      const { response } = await signUpAndGetSession(
+        customContext,
+        "ott-disabled-client@example.com",
+      );
       const cookieHeader = getCookieHeader(response);
       expect(cookieHeader.length).toBeGreaterThan(0);
 

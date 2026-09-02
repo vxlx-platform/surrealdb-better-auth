@@ -20,10 +20,11 @@
     "noEmitOnError": true,
     "declaration": true,
     "emitDeclarationOnly": true,
+    "rootDir": "./src",
     "outDir": "./node_modules/.cache/ts/out",
     "tsBuildInfoFile": "./node_modules/.cache/ts/tsbuildinfo",
-    "types": ["node"],
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["dist", "node_modules", "tests"],
+  "exclude": ["dist", "node_modules", "tests"]
 }

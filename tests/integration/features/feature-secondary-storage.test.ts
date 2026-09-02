@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { setCookieToHeader } from "better-auth/cookies";
 import type { BetterAuthOptions } from "better-auth";
+import { setCookieToHeader } from "better-auth/cookies";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { setupAuthContext } from "../../__helpers__/auth-context";
 import type { AuthContext } from "../../__helpers__/auth-context";
@@ -161,7 +161,8 @@ describe("Feature - Secondary Storage Sessions", () => {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const isMissingSessionTable =
-        /session/i.test(message) && /(does not exist|not found|unknown table|missing)/i.test(message);
+        /session/i.test(message) &&
+        /(does not exist|not found|unknown table|missing)/i.test(message);
       if (!isMissingSessionTable) {
         throw error;
       }

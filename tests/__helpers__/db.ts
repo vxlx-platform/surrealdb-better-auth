@@ -84,10 +84,7 @@ export async function createTestDbConnection(): Promise<LiveDbConnection> {
 
   const db = new Surreal();
   try {
-    await withConnectionStepTimeout(
-      "connecting to SurrealDB",
-      db.connect(runtimeConfig.endpoint),
-    );
+    await withConnectionStepTimeout("connecting to SurrealDB", db.connect(runtimeConfig.endpoint));
     await withConnectionStepTimeout(
       "signing in to SurrealDB",
       db.signin({ username: runtimeConfig.username, password: runtimeConfig.password }),

@@ -59,7 +59,9 @@ describe("Plugin - Anonymous", () => {
     const authOptions = context.auth.options as BetterAuthOptions;
     const schema = await context.adapter.createSchema?.(authOptions, "anonymous-plugin-live.surql");
 
-    expect(schema?.code).toMatch(/DEFINE FIELD(?: OVERWRITE)? isAnonymous ON TABLE user TYPE [^;]+;/);
+    expect(schema?.code).toMatch(
+      /DEFINE FIELD(?: OVERWRITE)? isAnonymous ON TABLE user TYPE [^;]+;/,
+    );
 
     const tableInfo = await context.db.query("INFO FOR TABLE user;");
     const fields =

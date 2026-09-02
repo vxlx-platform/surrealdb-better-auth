@@ -20,10 +20,7 @@ type MockClient = {
   isFeatureSupported?: ReturnType<typeof vi.fn>;
 };
 
-const createAdapter = (
-  client: MockClient,
-  config?: Parameters<typeof surrealAdapter>[1],
-) => {
+const createAdapter = (client: MockClient, config?: Parameters<typeof surrealAdapter>[1]) => {
   const auth = betterAuth({
     baseURL: "http://127.0.0.1:3000",
     secret: "01234567890123456789012345678901",

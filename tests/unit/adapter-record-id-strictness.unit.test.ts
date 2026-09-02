@@ -92,24 +92,19 @@ describe("Adapter Core - Record ID Strictness", () => {
     });
 
     expect(client.query).toHaveBeenCalledTimes(1);
-    const [, bindings] = client.query.mock.calls[0] as [
-      string,
-      Record<string, unknown>,
-    ];
+    const [, bindings] = client.query.mock.calls[0] as [string, Record<string, unknown>];
     const bindingValues = Object.values(bindings);
 
     const scalarRecordIds = bindingValues.filter(
-      (value): value is RecordId => value instanceof RecordId
+      (value): value is RecordId => value instanceof RecordId,
     );
     expect(scalarRecordIds.length).toBeGreaterThanOrEqual(2);
 
     const arrayRecordIds = bindingValues.filter(Array.isArray) as unknown[][];
     expect(arrayRecordIds).toHaveLength(2);
-    expect(
-      arrayRecordIds.every((list) =>
-        list.every((value) => value instanceof RecordId)
-      )
-    ).toBe(true);
+    expect(arrayRecordIds.every((list) => list.every((value) => value instanceof RecordId))).toBe(
+      true,
+    );
   });
 
   it("rejects bare logical ids across id-based CRUD operations", async () => {
@@ -120,7 +115,7 @@ describe("Adapter Core - Record ID Strictness", () => {
       adapter.findOne({
         model: "user",
         where: [{ field: "id", operator: "eq", value: "abc123" }],
-      })
+      }),
     ).rejects.toThrow('Invalid record id "abc123"');
 
     await expect(
@@ -128,14 +123,14 @@ describe("Adapter Core - Record ID Strictness", () => {
         model: "user",
         limit: 10,
         where: [{ field: "id", operator: "eq", value: "abc123" }],
-      })
+      }),
     ).rejects.toThrow('Invalid record id "abc123"');
 
     await expect(
       adapter.count({
         model: "user",
         where: [{ field: "id", operator: "eq", value: "abc123" }],
-      })
+      }),
     ).rejects.toThrow('Invalid record id "abc123"');
 
     await expect(
@@ -143,14 +138,14 @@ describe("Adapter Core - Record ID Strictness", () => {
         model: "user",
         where: [{ field: "id", operator: "eq", value: "abc123" }],
         update: { name: "Updated" },
-      })
+      }),
     ).rejects.toThrow('Invalid record id "abc123"');
 
     await expect(
       adapter.delete({
         model: "user",
         where: [{ field: "id", operator: "eq", value: "abc123" }],
-      })
+      }),
     ).rejects.toThrow('Invalid record id "abc123"');
 
     expect(client.query).not.toHaveBeenCalled();
@@ -165,14 +160,14 @@ describe("Adapter Core - Record ID Strictness", () => {
         malformedAdapter.findOne({
           model: "user",
           where: [{ field: "id", operator: "eq", value: invalidId }],
-        })
+        }),
       ).rejects.toThrow("Invalid record id");
     }
     await expect(
       malformedAdapter.findOne({
         model: "user",
         where: [{ field: "id", operator: "eq", value: "" }],
-      })
+      }),
     ).rejects.toThrow('Expected a Surreal record id for user, received "".');
 
     const mismatchClient = createMockClient();
@@ -181,7 +176,7 @@ describe("Adapter Core - Record ID Strictness", () => {
       mismatchAdapter.findOne({
         model: "user",
         where: [{ field: "id", operator: "eq", value: "session:s-1" }],
-      })
+      }),
     ).rejects.toThrow('references table "session", expected "user"');
 
     expect(malformedClient.query).not.toHaveBeenCalled();
@@ -196,7 +191,7 @@ describe("Adapter Core - Record ID Strictness", () => {
         model: "session",
         limit: 10,
         where: [{ field: "userId", operator: "eq", value: "u-1" }],
-      })
+      }),
     ).rejects.toThrow('Invalid record id "u-1"');
 
     const mismatchedReferenceClient = createMockClient();
@@ -206,7 +201,7 @@ describe("Adapter Core - Record ID Strictness", () => {
         model: "session",
         limit: 10,
         where: [{ field: "userId", operator: "eq", value: "account:a-1" }],
-      })
+      }),
     ).rejects.toThrow('references table "account", expected "user"');
 
     expect(bareReferenceClient.query).not.toHaveBeenCalled();
@@ -220,7 +215,7 @@ describe("Adapter Core - Record ID Strictness", () => {
       createAdapterInstance.create({
         model: "session",
         data: sessionWriteData("u-1"),
-      })
+      }),
     ).rejects.toThrow('Invalid record id "u-1"');
 
     const updateClient = createMockClient();
@@ -230,7 +225,7 @@ describe("Adapter Core - Record ID Strictness", () => {
         model: "session",
         where: [{ field: "id", operator: "eq", value: "session:s-1" }],
         update: { userId: "account:a-1" },
-      })
+      }),
     ).rejects.toThrow('references table "account", expected "user"');
 
     expect(createClient.query).not.toHaveBeenCalled();
@@ -238,9 +233,7 @@ describe("Adapter Core - Record ID Strictness", () => {
   });
 
   it("cannot bypass create id enforcement by supplying explicit primary ids", async () => {
-    const warnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
     try {
@@ -292,7 +285,7 @@ describe("Adapter Core - Record ID Strictness", () => {
         model: "user",
         limit: 10,
         where: [{ field: "id", operator: "in", value: ["user:u-1", "bad-id"] }],
-      })
+      }),
     ).rejects.toThrow('Invalid record id "bad-id"');
 
     const refInClient = createMockClient();
@@ -301,10 +294,8 @@ describe("Adapter Core - Record ID Strictness", () => {
       refInAdapter.findMany({
         model: "session",
         limit: 10,
-        where: [
-          { field: "userId", operator: "in", value: ["user:u-1", "bad-id"] },
-        ],
-      })
+        where: [{ field: "userId", operator: "in", value: ["user:u-1", "bad-id"] }],
+      }),
     ).rejects.toThrow('Invalid record id "bad-id"');
 
     expect(idInClient.query).not.toHaveBeenCalled();
@@ -338,12 +329,8 @@ describe("Adapter Core - Record ID Strictness", () => {
     expect(String(found?.id)).not.toBe("s-1");
     expect(String(found?.userId)).toMatch(/^user:/);
     expect(String(found?.userId)).not.toBe("u-1");
-    expect(new StringRecordId(String(found?.id)).toString()).toMatch(
-      /^session:/
-    );
-    expect(new StringRecordId(String(found?.userId)).toString()).toMatch(
-      /^user:/
-    );
+    expect(new StringRecordId(String(found?.id)).toString()).toMatch(/^session:/);
+    expect(new StringRecordId(String(found?.userId)).toString()).toMatch(/^user:/);
     expect(found?.expiresAt).toBeInstanceOf(Date);
   });
 
@@ -370,10 +357,7 @@ describe("Adapter Core - Record ID Strictness", () => {
     });
 
     expect(client.query).toHaveBeenCalledTimes(1);
-    const [, bindings] = client.query.mock.calls[0] as [
-      string,
-      { data: Record<string, unknown> },
-    ];
+    const [, bindings] = client.query.mock.calls[0] as [string, { data: Record<string, unknown> }];
     expect(bindings.data.userId).toBeInstanceOf(RecordId);
   });
 });
