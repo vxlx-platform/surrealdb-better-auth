@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-02
+
+### ⚠ Breaking
+
+- Raised the `@better-auth/core` peer range from `^1.5.4` to `^1.7.2` and `@better-auth/utils` from `^0.3.1` to an exact `0.4.2`, matching the better-auth 1.7.x line this release is verified against. Consumers on `@better-auth/core` 1.5.x/1.6.x must upgrade better-auth before taking this release.
+
+### Changed
+
+- Implemented `CustomAdapter.consumeOne` and `CustomAdapter.incrementOne`, the two native atomic primitives `@better-auth/core` 1.7.x added to its adapter interface: `consumeOne` for race-safe single-use credential consumption (verification tokens, authorization codes, one-time tokens) via `DELETE ONLY ... RETURN BEFORE`, and `incrementOne` for distributed-safe guarded counter mutation (e.g. rate limiting) via `UPDATE ONLY ... SET n = n + $delta WHERE <guard> RETURN AFTER`. Both reuse the same query-building pattern as the existing `delete`/`update` methods; their zero-match, multi-match, and concurrent-guard semantics were verified empirically against a live SurrealDB instance.
+- Updated `better-auth`/`@better-auth/core`/`@better-auth/passkey` to 1.7.2 and `surrealdb` to 2.0.8.
+
 ## [0.10.0] - 2026-04-28
 
 ### Changed
