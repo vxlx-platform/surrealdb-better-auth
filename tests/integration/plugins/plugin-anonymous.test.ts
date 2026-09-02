@@ -82,7 +82,12 @@ describe("Plugin - Anonymous", () => {
     expect(body.token).toBeDefined();
     expect(body.user.id).toMatch(/^user:/);
     expect(body.user.name).toBe("Anonymous");
-    expect(body.user.email).toMatch(/^temp@.+\.com$/);
+    // Better Auth's anonymous plugin default placeholder domain changed to
+    // the IANA-reserved `.invalid` TLD (better-auth 1.7.x), replacing the
+    // old ad-hoc `temp@*.com` pattern that could collide with a real
+    // registered domain -- see AnonymousOptions.domain's documented
+    // `@default "anonymous.placeholder.invalid"`.
+    expect(body.user.email).toMatch(/^[^@]+@anonymous\.placeholder\.invalid$/);
     expect(body.user.isAnonymous).toBe(true);
 
     const dbUser = await context.adapter.findOne<AnonymousUser>({

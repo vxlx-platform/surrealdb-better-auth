@@ -30,6 +30,27 @@ const createInMemorySecondaryStorage = (): SecondaryStorageWithHelpers => {
 
   return {
     get: async (key: string) => read(key),
+    getAndDelete: async (key: string) => {
+      const value = read(key);
+      entries.delete(key);
+      return value;
+    },
+    increment: async (key: string, ttl: number) => {
+      const current = read(key);
+      const next = (current === undefined ? 0 : Number(current)) + 1;
+      // TTL is applied only on creation (no existing, live entry) -- a
+      // later increment must not extend an already-running expiry, per
+      // better-auth's documented SecondaryStorage.increment contract.
+      const existing = entries.get(key);
+      const expiresAt =
+        existing && (existing.expiresAt === null || existing.expiresAt > Date.now())
+          ? existing.expiresAt
+          : typeof ttl === "number" && ttl > 0
+            ? Date.now() + ttl * 1000
+            : null;
+      entries.set(key, { value: String(next), expiresAt });
+      return next;
+    },
     set: async (key: string, value: string, ttl?: number) => {
       const expiresAt = typeof ttl === "number" && ttl > 0 ? Date.now() + ttl * 1000 : null;
       entries.set(key, { value, expiresAt });

@@ -59,6 +59,14 @@ export const buildSessionSeed = (overrides: Partial<SessionSeed> = {}): SessionS
 export type AccountSeed = {
   accountId: string;
   providerId: string;
+  // Required by better-auth's account schema (`issuer: z.string()`) and
+  // part of its `(issuer, accountId)` compound index. Better Auth itself
+  // synthesizes this as `local:${encodeURIComponent(providerId)}` for
+  // providers without an issuer of their own (see
+  // `createLocalAccountIssuer` in @better-auth/core's account schema) --
+  // mirrored here since direct adapter.create() calls bypass the
+  // higher-level account-linking code that would normally fill it in.
+  issuer: string;
   userId: string;
   accessToken?: string | undefined;
   refreshToken?: string | undefined;
@@ -73,9 +81,11 @@ export type AccountSeed = {
 
 export const buildAccountSeed = (overrides: Partial<AccountSeed> = {}): AccountSeed => {
   const now = new Date();
+  const providerId = overrides.providerId ?? token("provider");
   return {
     accountId: token("account"),
-    providerId: token("provider"),
+    providerId,
+    issuer: `local:${encodeURIComponent(providerId)}`,
     userId: "user:seed_user",
     accessToken: undefined,
     refreshToken: undefined,

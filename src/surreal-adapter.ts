@@ -772,6 +772,27 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
     };
   };
 
+  // `field = field + $delta` per entry, using a `__inc_` key namespace so
+  // bindings never collide with `buildUpdateSetStatement`'s `__upd_` keys
+  // when both are merged into one SET clause (see `incrementOne`).
+  const buildIncrementSetStatement = (
+    increment: Record<string, number>,
+  ): { setClause: string; bindings: PlainObject } => {
+    const fragments = Object.entries(increment).map(([field, delta], index) => {
+      const key = `__inc_${index}__`;
+      const ident = toEscapedFieldIdent(field);
+      return {
+        assignment: `${ident} = ${ident} + $${key}`,
+        binding: [key, delta] as const,
+      };
+    });
+
+    return {
+      setClause: fragments.map(({ assignment }) => assignment).join(", "),
+      bindings: Object.fromEntries(fragments.map(({ binding }) => binding)),
+    };
+  };
+
   const whereOperatorExprBuilders = {
     eq: (field: string, value: unknown): Expr => eq(field, value),
     ne: (field: string, value: unknown): Expr => ne(field, value),
@@ -1026,6 +1047,75 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
           query.append(" RETURN BEFORE;");
           const deleted = await execQuery<Record<string, unknown>>(query);
           return deleted.length;
+        },
+
+        // Atomic delete-and-return-before, single row. Empirically verified
+        // (surreal 3.2.4): `DELETE ONLY <table> WHERE <cond> RETURN BEFORE`
+        // returns NONE on zero matches (no throw) and throws only when the
+        // where clause matches MORE than one row ("Expected a single result
+        // output when using the ONLY keyword") -- exactly the null-on-no-
+        // match, reject-ambiguous-filters contract this method requires,
+        // and the same pattern `delete` above already uses for Better
+        // Auth's single-record delete contract.
+        async consumeOne<T>({
+          model,
+          where,
+        }: {
+          model: string;
+          where: CleanedWhere[];
+        }): Promise<T | null> {
+          const tableName = toTableIdent(getModelName(model));
+          const whereClause = buildWhereClause(where);
+          const query = new BoundQuery(`DELETE ONLY ${tableName}`);
+          appendWhereClause(query, whereClause);
+          query.append(" RETURN BEFORE;");
+          return await execQueryFirst<T>(query);
+        },
+
+        // Atomic guarded counter mutation. Empirically verified (surreal
+        // 3.2.4): `UPDATE ONLY <table> SET n = n + $delta WHERE <guard>
+        // RETURN AFTER` evaluates the WHERE guard and the mutation as one
+        // atomic step per matching row, so concurrent calls against the
+        // same row correctly serialize (a `remaining > 0` guard cannot be
+        // decremented below zero by a race), and returns NONE gracefully
+        // when the guard matches no row.
+        async incrementOne<T>({
+          model,
+          where,
+          increment,
+          set,
+        }: {
+          model: string;
+          where: CleanedWhere[];
+          increment: Record<string, number>;
+          set?: Record<string, unknown> | undefined;
+        }): Promise<T | null> {
+          const tableName = toTableIdent(getModelName(model));
+          const whereClause = buildWhereClause(where);
+
+          const { setClause: incrementClause, bindings: incrementBindings } =
+            buildIncrementSetStatement(increment);
+          const { setClause: absoluteClause, bindings: absoluteBindings } =
+            set && isPlainObject(set) ? buildUpdateSetStatement(set) : { setClause: "", bindings: {} };
+
+          const setClause = [incrementClause, absoluteClause].filter(Boolean).join(", ");
+
+          if (!setClause) {
+            // No increment deltas and no set fields: treat as a guard-only
+            // read, matching `update`'s handling of an empty set payload.
+            const query = new BoundQuery(`SELECT * FROM ${tableName}`);
+            appendWhereClause(query, whereClause);
+            query.append(" LIMIT 1;");
+            return await execQueryFirst<T>(query);
+          }
+
+          const query = new BoundQuery(`UPDATE ONLY ${tableName} SET ${setClause}`, {
+            ...incrementBindings,
+            ...absoluteBindings,
+          });
+          appendWhereClause(query, whereClause);
+          query.append(" RETURN AFTER;");
+          return await execQueryFirst<T>(query);
         },
 
         async createSchema({
