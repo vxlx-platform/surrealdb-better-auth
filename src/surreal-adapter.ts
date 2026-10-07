@@ -314,6 +314,22 @@ const formatRecordId = (value: RecordId | StringRecordId): string => {
   return String(value);
 };
 
+// Reverses the delimiting RecordId.toString() applies to ids that are not plain
+// identifiers (surrealdb's escapeIdent). Since surrealdb 2.0.10: ⟨…⟩ holds the
+// id verbatim and is only used when it contains no ⟩ or backslash; backticks are
+// used otherwise, with \\ and \` escaped inside; and a leading digit is
+// delimited too, so a random id like "1vXq…" comes back as "session:⟨1vXq…⟩".
+// Through 2.0.9, ⟨…⟩ was used for every case with only ⟩ escaped, as \⟩.
+const unescapeRecordIdPart = (id: string): string => {
+  if (id.length >= 2 && id.startsWith("⟨") && id.endsWith("⟩")) {
+    return id.slice(1, -1).replaceAll("\\⟩", "⟩");
+  }
+  if (id.length >= 2 && id.startsWith("`") && id.endsWith("`")) {
+    return id.slice(1, -1).replace(/\\(.)/gs, "$1");
+  }
+  return id;
+};
+
 const toSurrealStringLiteral = (value: string): string =>
   `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
 
@@ -414,7 +430,7 @@ export const surrealAdapter = (client: SurrealClient, config: SurrealAdapterConf
   const parseRecordIdParts = (value: string, expectedTable?: string) => {
     const separator = value.indexOf(":");
     const table = separator > 0 ? value.slice(0, separator) : "";
-    const id = separator > -1 ? value.slice(separator + 1) : "";
+    const id = separator > -1 ? unescapeRecordIdPart(value.slice(separator + 1)) : "";
 
     if (!table || !id) {
       throw adapterError(`Invalid record id "${value}". Expected the format "table:id".`);
