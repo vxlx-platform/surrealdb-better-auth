@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-10-07
+
+### Fixed
+
+- Record ids read back in their canonical string form now resolve to the same record. `RecordId.toString()` delimits ids that are not plain identifiers — `⟨…⟩`, or backticks for ids containing `⟩` or a backslash — and the adapter kept those delimiters as part of the id when parsing `table:id` strings, so the lookup targeted a different record. surrealdb 2.0.10 also started delimiting ids with a leading digit, which made this hit roughly one in six random Better Auth ids: a session created at sign-up could not be found on the next request (`get-session` returned `null`). Ids with hyphens, non-ASCII characters or reserved words were affected on earlier SDK versions too.
+
+### Changed
+
+- Development dependency `surrealdb` updated to 2.0.10. The peer range stays `^2.0.8`; both escaping forms are handled.
+
 ## [0.11.0] - 2026-09-02
 
 ### ⚠ Breaking

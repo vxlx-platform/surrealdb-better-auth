@@ -334,6 +334,62 @@ describe("Adapter Core - Record ID Strictness", () => {
     expect(found?.expiresAt).toBeInstanceOf(Date);
   });
 
+  // RecordId.toString() delimits ids that are not plain identifiers: ⟨1abc⟩ for a
+  // leading digit (escaped since surrealdb 2.0.10), a reserved word, or a
+  // non-ASCII character, and backticks with \\ and \` escapes when the id holds
+  // ⟩ or a backslash. Outputs use that canonical form, so reading one back must
+  // resolve to the same record, not to an id that includes the delimiters.
+  it.each([
+    "1vXq9abc",
+    "9",
+    "a-b",
+    "select",
+    "a:b",
+    "ünï",
+    "a⟩b",
+    "a\\b",
+    "a`b",
+  ])("round-trips the canonical form of record id %j to the same record", async (rawId) => {
+    const client = createMockClient([
+      [
+        {
+          id: new RecordId("session", rawId),
+          userId: new RecordId("user", rawId),
+          token: "session-token",
+          expiresAt: new DateTime("2026-03-13T12:00:00.000Z"),
+          createdAt: new DateTime("2026-03-13T12:00:00.000Z"),
+          updatedAt: new DateTime("2026-03-13T12:00:00.000Z"),
+          ipAddress: null,
+          userAgent: null,
+        },
+      ],
+    ]);
+    const adapter = createAdapter(client);
+
+    const found = await adapter.findOne<Record<string, unknown>>({
+      model: "session",
+      where: [{ field: "id", operator: "eq", value: "session:placeholder" }],
+    });
+    expect(found).not.toBeNull();
+
+    await adapter.findOne({
+      model: "session",
+      where: [
+        { field: "id", operator: "eq", value: String(found?.id) },
+        { field: "userId", operator: "eq", value: String(found?.userId), connector: "AND" },
+      ],
+    });
+
+    const [, bindings] = client.query.mock.calls[1] as [string, Record<string, unknown>];
+    const recordIds = Object.values(bindings).filter(
+      (value): value is RecordId => value instanceof RecordId,
+    );
+    expect(recordIds.map((value) => [value.table.name, value.id])).toEqual([
+      ["session", rawId],
+      ["user", rawId],
+    ]);
+  });
+
   it("normalizes valid reference ids to RecordId for writes", async () => {
     const client = createMockClient([
       [
